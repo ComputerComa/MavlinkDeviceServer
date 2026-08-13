@@ -29,7 +29,7 @@ internal static class Program
     private static async Task Main()
     {
         var listenEndpoint = new IPEndPoint(
-            IPAddress.Loopback,
+            IPAddress.Any,
             ListenPort);
 
         Directory.CreateDirectory("logs");
@@ -57,7 +57,7 @@ internal static class Program
         Console.WriteLine("MAVLink Device Server — SITL test");
         Console.WriteLine($"Listening: {listenEndpoint}");
         Console.WriteLine($"Debug log: {Path.GetFullPath(logPath)}");
-        Console.WriteLine("Waiting for Mission Planner...");
+        Console.WriteLine("Waiting for MAVLink traffic...");
         Console.WriteLine("Press Ctrl+C to stop.");
         Console.WriteLine();
 
@@ -550,7 +550,7 @@ internal static class Program
             statusCounter++;
 
             // ONBOARD_COMPUTER_STATUS at 1 Hz for this test.
-            if (statusCounter >= 1)
+            if (statusCounter >= 5)
             {
                 statusCounter = 0;
 
