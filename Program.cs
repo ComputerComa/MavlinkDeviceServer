@@ -3,6 +3,7 @@ using Asv.Mavlink;
 using Asv.Mavlink.Common;
 using Asv.Mavlink.Minimal;
 using MavlinkDeviceServer.Components;
+using MavlinkDeviceServer.Gimbal;
 using MavlinkDeviceServer.Logging;
 using MavlinkDeviceServer.Mavlink;
 
@@ -28,8 +29,11 @@ internal static class Program
         };
 
         var components = new ComponentRegistry();
+        const byte gimbalDeviceComponentId = 154;
+        var gimbal = new FakeGimbalDevice();
+
         components.Register(new OnboardComputerComponent(DeviceSystemId, (byte)MavComponent.MavCompIdOnboardComputer));
-        components.Register(new GimbalComponent(DeviceSystemId, 154));
+        components.Register(new GimbalComponent(DeviceSystemId, gimbalDeviceComponentId, gimbal));
         components.Register(new CameraComponent(DeviceSystemId, 100));
 
         var dispatcher = new MavlinkMessageDispatcher(DeviceSystemId, components, debugLog);

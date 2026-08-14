@@ -1,21 +1,35 @@
 using Asv.Mavlink.Common;
 using Asv.Mavlink.Minimal;
+using MavlinkDeviceServer.Gimbal;
 using MavlinkDeviceServer.Mavlink;
 
 namespace MavlinkDeviceServer.Components;
 
-public sealed class GimbalComponent(byte systemId, byte componentId)
+public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevice gimbal)
     : MavlinkComponentBase(systemId, componentId)
 {
     private const uint CommandLongMessageId = 76;
+    private const uint GimbalManagerSetAttitudeMessageId = 282;
     private const uint GimbalDeviceInformationMessageId = 283;
     private const uint GimbalDeviceAttitudeStatusMessageId = 285;
+    // The manager and device share this MAVLink component, so use instance 1.
+    private const byte GimbalDeviceInstanceId = 1;
 
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } =
-        [CommandLongMessageId];
+        [CommandLongMessageId, GimbalManagerSetAttitudeMessageId];
 
     public override IEnumerable<OutgoingMessage> HandleMessage(
         MavlinkMessageContext context)
+    {
+        return context.MessageId switch
+        {
+            CommandLongMessageId => HandleCommandLong(context),
+            GimbalManagerSetAttitudeMessageId => HandleManagerSetAttitude(context),
+            _ => []
+        };
+    }
+
+    private IEnumerable<OutgoingMessage> HandleCommandLong(MavlinkMessageContext context)
     {
         if (context.Frame.Span[0] != 0xFD)
         {
@@ -58,9 +72,50 @@ public sealed class GimbalComponent(byte systemId, byte componentId)
         };
     }
 
+    private IEnumerable<OutgoingMessage> HandleManagerSetAttitude(
+        MavlinkMessageContext context)
+    {
+        GimbalManagerSetAttitudePacket command;
+        try
+        {
+            command = new GimbalManagerSetAttitudePacket();
+            var readSpan = context.Frame.Span;
+            command.Deserialize(ref readSpan);
+        }
+        catch (Exception exception)
+        {
+            context.Log.Write($"GIMBAL_MANAGER_SET_ATTITUDE decode failed: {exception}");
+            return [];
+        }
+
+        if (command.Payload.GimbalDeviceId is not 0 and not GimbalDeviceInstanceId)
+        {
+            return [];
+        }
+
+        var attitude = new GimbalQuaternion(
+            command.Payload.Q[0], command.Payload.Q[1],
+            command.Payload.Q[2], command.Payload.Q[3]);
+
+        if (!gimbal.SetAttitude(
+                attitude,
+                command.Payload.AngularVelocityX,
+                command.Payload.AngularVelocityY,
+                command.Payload.AngularVelocityZ))
+        {
+            context.Log.Write("GIMBAL_MANAGER_SET_ATTITUDE ignored invalid quaternion");
+        }
+
+        return [];
+    }
+
     public override IEnumerable<OutgoingMessage> GetPeriodicMessages(
         DateTimeOffset now) =>
-        [new(CreateAttitudeStatus(), "GIMBAL_DEVICE_ATTITUDE_STATUS")];
+        [
+            new(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}"),
+            new(CreateManagerStatus(), "GIMBAL_MANAGER_STATUS"),
+            new(CreateAttitudeStatus(), "GIMBAL_DEVICE_ATTITUDE_STATUS")
+        ];
 
     private GimbalDeviceInformationPacket CreateDeviceInformation()
     {
@@ -75,16 +130,16 @@ public sealed class GimbalComponent(byte systemId, byte componentId)
         packet.Payload.Uid = 0x4D_44_53_47_49_4D_42_4CUL;
         packet.Payload.FirmwareVersion = PackVersion(1, 0, 0, 0);
         packet.Payload.HardwareVersion = 1;
-        packet.Payload.RollMin = -0.7854f;
-        packet.Payload.RollMax = 0.7854f;
-        packet.Payload.PitchMin = -1.5708f;
-        packet.Payload.PitchMax = 0.5236f;
-        packet.Payload.YawMin = -3.1416f;
-        packet.Payload.YawMax = 3.1416f;
+        packet.Payload.RollMin = gimbal.Limits.RollMinRadians;
+        packet.Payload.RollMax = gimbal.Limits.RollMaxRadians;
+        packet.Payload.PitchMin = gimbal.Limits.PitchMinRadians;
+        packet.Payload.PitchMax = gimbal.Limits.PitchMaxRadians;
+        packet.Payload.YawMin = gimbal.Limits.YawMinRadians;
+        packet.Payload.YawMax = gimbal.Limits.YawMaxRadians;
         CreateFixedName("MavlinkDeviceServer").CopyTo(packet.Payload.VendorName, 0);
         CreateFixedName("Fake Gimbal").CopyTo(packet.Payload.ModelName, 0);
         CreateFixedName("Fake MAVLink Gimbal").CopyTo(packet.Payload.CustomName, 0);
-        packet.Payload.GimbalDeviceId = 0;
+        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
         return packet;
     }
 
@@ -97,9 +152,51 @@ public sealed class GimbalComponent(byte systemId, byte componentId)
             Sequence = NextSequence()
         };
 
+        var state = gimbal.State;
+        var attitude = GimbalQuaternion.FromEuler(
+            state.RollRadians,
+            state.PitchRadians,
+            state.YawRadians);
+
         packet.Payload.TimeBootMs = BootTimeMilliseconds();
-        packet.Payload.Q[0] = 1f;
-        packet.Payload.GimbalDeviceId = 0;
+        packet.Payload.Q[0] = attitude.W;
+        packet.Payload.Q[1] = attitude.X;
+        packet.Payload.Q[2] = attitude.Y;
+        packet.Payload.Q[3] = attitude.Z;
+        packet.Payload.AngularVelocityX = state.RollRateRadiansPerSecond;
+        packet.Payload.AngularVelocityY = state.PitchRateRadiansPerSecond;
+        packet.Payload.AngularVelocityZ = state.YawRateRadiansPerSecond;
+        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        return packet;
+    }
+
+    private HeartbeatPacket CreateHeartbeat()
+    {
+        var packet = new HeartbeatPacket
+        {
+            SystemId = SystemId,
+            ComponentId = ComponentId,
+            Sequence = NextSequence()
+        };
+
+        packet.Payload.Type = MavType.MavTypeGimbal;
+        packet.Payload.Autopilot = MavAutopilot.MavAutopilotInvalid;
+        packet.Payload.SystemStatus = MavState.MavStateActive;
+        packet.Payload.MavlinkVersion = 3;
+        return packet;
+    }
+
+    private GimbalManagerStatusPacket CreateManagerStatus()
+    {
+        var packet = new GimbalManagerStatusPacket
+        {
+            SystemId = SystemId,
+            ComponentId = ComponentId,
+            Sequence = NextSequence()
+        };
+
+        packet.Payload.TimeBootMs = BootTimeMilliseconds();
+        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
         return packet;
     }
 

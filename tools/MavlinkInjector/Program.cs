@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Globalization;
 using Asv.Mavlink;
 using Asv.Mavlink.Common;
 using Asv.Mavlink.Minimal;
@@ -11,7 +12,9 @@ internal static class InjectorApplication
     private static readonly IReadOnlyDictionary<string, IInjectorCommand> Commands =
         new Dictionary<string, IInjectorCommand>(StringComparer.OrdinalIgnoreCase)
         {
-            ["gimbal-info"] = new GimbalInfoCommand()
+            ["gimbal-info"] = new GimbalInfoCommand(),
+            ["gimbal-set-attitude"] = new GimbalSetAttitudeCommand("gimbal-set-attitude", false),
+            ["gimbal-center"] = new GimbalSetAttitudeCommand("gimbal-center", true)
         };
 
     public static async Task<int> RunAsync(string[] args)
@@ -35,7 +38,7 @@ internal static class InjectorApplication
             return 0;
         }
 
-        if (!InjectorOptions.TryParse(args[1..], out var options, out var error))
+        if (!InjectorOptions.TryParse(args[1..], command.DefaultTargetComponent, out var options, out var error))
         {
             Console.Error.WriteLine($"Invalid arguments: {error}");
             command.PrintHelp();
@@ -77,6 +80,7 @@ internal static class InjectorApplication
 
 internal interface IInjectorCommand
 {
+    byte DefaultTargetComponent { get; }
     MavlinkV2Message CreatePacket(InjectorOptions options);
     void VerifyPacket(byte[] frame, InjectorOptions options);
     IReadOnlyList<ExpectedResponse> ExpectedResponses(InjectorOptions options);
@@ -94,6 +98,7 @@ internal sealed record ExpectedResponse(
 internal sealed class GimbalInfoCommand : IInjectorCommand
 {
     private const uint GimbalDeviceInformationMessageId = 283;
+    public byte DefaultTargetComponent => 154;
 
     public MavlinkV2Message CreatePacket(InjectorOptions options)
     {
@@ -137,7 +142,7 @@ internal sealed class GimbalInfoCommand : IInjectorCommand
     {
         Console.WriteLine("Usage: mavlink-injector gimbal-info [options]");
         Console.WriteLine();
-        InjectorOptions.PrintHelp();
+        InjectorOptions.PrintHelp(DefaultTargetComponent);
     }
 
     public IReadOnlyList<ExpectedResponse> ExpectedResponses(InjectorOptions options) =>
@@ -159,13 +164,97 @@ internal sealed class GimbalInfoCommand : IInjectorCommand
     }
 }
 
-internal sealed record InjectorOptions(IPAddress Host, int Port, byte SourceSystem, byte SourceComponent, byte TargetSystem, byte TargetComponent)
+internal sealed class GimbalSetAttitudeCommand(string name, bool center) : IInjectorCommand
 {
-    public static bool TryParse(string[] arguments, out InjectorOptions options, out string error)
+    private const byte GimbalComponentId = 154;
+    public byte DefaultTargetComponent => GimbalComponentId;
+
+    public MavlinkV2Message CreatePacket(InjectorOptions options)
+    {
+        var (roll, pitch, yaw) = center ? (0f, 0f, 0f) :
+            (options.RollDegrees, options.PitchDegrees, options.YawDegrees);
+        var q = EulerDegreesToQuaternion(roll, pitch, yaw);
+        var packet = new GimbalManagerSetAttitudePacket
+        {
+            SystemId = options.SourceSystem,
+            ComponentId = options.SourceComponent,
+            Sequence = 0
+        };
+
+        packet.Payload.TargetSystem = options.TargetSystem;
+        packet.Payload.TargetComponent = options.TargetComponent;
+        packet.Payload.GimbalDeviceId = 1;
+        packet.Payload.Q[0] = q.W;
+        packet.Payload.Q[1] = q.X;
+        packet.Payload.Q[2] = q.Y;
+        packet.Payload.Q[3] = q.Z;
+        packet.Payload.AngularVelocityX = float.NaN;
+        packet.Payload.AngularVelocityY = float.NaN;
+        packet.Payload.AngularVelocityZ = float.NaN;
+        return packet;
+    }
+
+    public void VerifyPacket(byte[] frame, InjectorOptions options)
+    {
+        var decoded = new GimbalManagerSetAttitudePacket();
+        ReadOnlySpan<byte> readSpan = frame;
+        decoded.Deserialize(ref readSpan);
+        if (decoded.SystemId != options.SourceSystem ||
+            decoded.ComponentId != options.SourceComponent ||
+            decoded.Payload.TargetSystem != options.TargetSystem ||
+            decoded.Payload.TargetComponent != options.TargetComponent ||
+            decoded.Payload.GimbalDeviceId != 1)
+        {
+            throw new InvalidOperationException("Encoded GIMBAL_MANAGER_SET_ATTITUDE did not match the requested command.");
+        }
+    }
+
+    public IReadOnlyList<ExpectedResponse> ExpectedResponses(InjectorOptions options) => [];
+
+    public void PrintHelp()
+    {
+        Console.WriteLine($"Usage: mavlink-injector {name} [options]");
+        Console.WriteLine();
+        InjectorOptions.PrintHelp(DefaultTargetComponent);
+        if (!center) Console.WriteLine("  --roll <degrees>           Requested roll (default: 0)");
+        if (!center) Console.WriteLine("  --pitch <degrees>          Requested pitch (default: 0)");
+        if (!center) Console.WriteLine("  --yaw <degrees>            Requested yaw (default: 0)");
+    }
+
+    public void PrintSent(InjectorOptions options)
+    {
+        var (roll, pitch, yaw) = center ? (0f, 0f, 0f) :
+            (options.RollDegrees, options.PitchDegrees, options.YawDegrees);
+        Console.WriteLine("MAVLink Injector");
+        Console.WriteLine($"Destination: {options.Host}:{options.Port}");
+        Console.WriteLine($"Source:      {options.SourceSystem}/{options.SourceComponent}");
+        Console.WriteLine($"Target:      {options.TargetSystem}/{options.TargetComponent}");
+        Console.WriteLine("Message:     GIMBAL_MANAGER_SET_ATTITUDE");
+        Console.WriteLine($"Requested:   roll={roll:F1}°, pitch={pitch:F1}°, yaw={yaw:F1}°");
+        Console.WriteLine("Sent successfully.");
+    }
+
+    private static (float W, float X, float Y, float Z) EulerDegreesToQuaternion(float rollDegrees, float pitchDegrees, float yawDegrees)
+    {
+        var roll = rollDegrees * MathF.PI / 180f;
+        var pitch = pitchDegrees * MathF.PI / 180f;
+        var yaw = yawDegrees * MathF.PI / 180f;
+        var cr = MathF.Cos(roll / 2f); var sr = MathF.Sin(roll / 2f);
+        var cp = MathF.Cos(pitch / 2f); var sp = MathF.Sin(pitch / 2f);
+        var cy = MathF.Cos(yaw / 2f); var sy = MathF.Sin(yaw / 2f);
+        return (cr * cp * cy + sr * sp * sy, sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy, cr * cp * sy - sr * sp * cy);
+    }
+}
+
+internal sealed record InjectorOptions(IPAddress Host, int Port, byte SourceSystem, byte SourceComponent, byte TargetSystem, byte TargetComponent, float RollDegrees, float PitchDegrees, float YawDegrees)
+{
+    public static bool TryParse(string[] arguments, byte defaultTargetComponent, out InjectorOptions options, out string error)
     {
         var host = IPAddress.Loopback;
         var port = 14552;
-        byte sourceSystem = 255, sourceComponent = 190, targetSystem = 1, targetComponent = 154;
+        byte sourceSystem = 255, sourceComponent = 190, targetSystem = 1, targetComponent = defaultTargetComponent;
+        var rollDegrees = 0f; var pitchDegrees = 0f; var yawDegrees = 0f;
 
         for (var index = 0; index < arguments.Length; index += 2)
         {
@@ -186,6 +275,9 @@ internal sealed record InjectorOptions(IPAddress Host, int Port, byte SourceSyst
                 case "--source-component" when byte.TryParse(value, out var parsedSourceComponent): sourceComponent = parsedSourceComponent; break;
                 case "--target-system" when byte.TryParse(value, out var parsedTargetSystem): targetSystem = parsedTargetSystem; break;
                 case "--target-component" when byte.TryParse(value, out var parsedTargetComponent): targetComponent = parsedTargetComponent; break;
+                case "--roll" when TryParseFiniteFloat(value, out var parsedRoll): rollDegrees = parsedRoll; break;
+                case "--pitch" when TryParseFiniteFloat(value, out var parsedPitch): pitchDegrees = parsedPitch; break;
+                case "--yaw" when TryParseFiniteFloat(value, out var parsedYaw): yawDegrees = parsedYaw; break;
                 default:
                     options = default!;
                     error = $"Invalid value '{value}' for option '{option}'.";
@@ -193,19 +285,22 @@ internal sealed record InjectorOptions(IPAddress Host, int Port, byte SourceSyst
             }
         }
 
-        options = new InjectorOptions(host, port, sourceSystem, sourceComponent, targetSystem, targetComponent);
+        options = new InjectorOptions(host, port, sourceSystem, sourceComponent, targetSystem, targetComponent, rollDegrees, pitchDegrees, yawDegrees);
         error = string.Empty;
         return true;
     }
 
-    public static void PrintHelp()
+    private static bool TryParseFiniteFloat(string value, out float result) =>
+        float.TryParse(value, CultureInfo.InvariantCulture, out result) && float.IsFinite(result);
+
+    public static void PrintHelp(byte defaultTargetComponent)
     {
         Console.WriteLine("  --host <IP address>        Destination host (default: 127.0.0.1)");
         Console.WriteLine("  --port <1-65535>           Destination UDP port (default: 14552)");
         Console.WriteLine("  --source-system <0-255>    Source system ID (default: 255)");
         Console.WriteLine("  --source-component <0-255> Source component ID (default: 190)");
         Console.WriteLine("  --target-system <0-255>    Target system ID (default: 1)");
-        Console.WriteLine("  --target-component <0-255> Target component ID (default: 154)");
+        Console.WriteLine($"  --target-component <0-255> Target component ID (default: {defaultTargetComponent})");
     }
 }
 
