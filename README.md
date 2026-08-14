@@ -64,7 +64,7 @@ runner; it is not a local project dependency.
 - [Injector usage](docs/guides/injector.md)
 
 Configure **Settings → Pages → Build and deployment** to use **GitHub Actions**.
-The workflow deploys after a push to `main` or when manually dispatched.
+The workflow deploys after a push to `master` or when manually dispatched.
 
 ## Important current limitation
 
