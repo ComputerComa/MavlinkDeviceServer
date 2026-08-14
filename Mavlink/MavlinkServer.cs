@@ -14,7 +14,14 @@ public sealed class MavlinkServer(IPEndPoint listenEndpoint, MavlinkMessageDispa
         {
             while (!cancellationToken.IsCancellationRequested)
             {
-                UdpReceiveResult datagram; try { datagram = await socket.ReceiveAsync(cancellationToken); } catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+                UdpReceiveResult datagram;
+                try { datagram = await socket.ReceiveAsync(cancellationToken); }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
+                catch (SocketException exception) when (exception.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    await log.WriteAsync($"UDP receive reset ({exception.ErrorCode}); continuing to listen: {exception.Message}");
+                    continue;
+                }
                 if (remoteEndpoint is null || !remoteEndpoint.Equals(datagram.RemoteEndPoint)) { remoteEndpoint = datagram.RemoteEndPoint; Console.WriteLine($"MAVLink endpoint detected: {remoteEndpoint}"); Console.WriteLine("Periodic telemetry transmission started."); Console.WriteLine(); await log.WriteAsync($"Remote endpoint set to {remoteEndpoint}"); }
                 foreach (var response in ProcessDatagram(datagram.Buffer, datagram.RemoteEndPoint)) { var frame = MavlinkCodec.Encode(response.Packet); await socket.SendAsync(frame, datagram.RemoteEndPoint, cancellationToken); await log.WriteFrameAsync("TX", datagram.RemoteEndPoint, response.Description, frame); }
             }

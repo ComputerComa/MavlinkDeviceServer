@@ -12,12 +12,12 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     private const uint GimbalManagerInformationMessageId = 280;
     private const uint GimbalManagerSetAttitudeMessageId = 282;
     private const uint GimbalDeviceInformationMessageId = 283;
+    private const uint GimbalDeviceSetAttitudeMessageId = 284;
     private const uint GimbalDeviceAttitudeStatusMessageId = 285;
-    // The manager and device share this MAVLink component, so use instance 1.
-    private const byte GimbalDeviceInstanceId = 1;
+    private const byte GimbalDeviceComponentId = 154;
 
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } =
-        [CommandLongMessageId, GimbalManagerSetAttitudeMessageId];
+        [CommandLongMessageId, GimbalManagerSetAttitudeMessageId, GimbalDeviceSetAttitudeMessageId];
 
     public override IEnumerable<OutgoingMessage> HandleMessage(
         MavlinkMessageContext context)
@@ -26,6 +26,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         {
             CommandLongMessageId => HandleCommandLong(context),
             GimbalManagerSetAttitudeMessageId => HandleManagerSetAttitude(context),
+            GimbalDeviceSetAttitudeMessageId => HandleDeviceSetAttitude(context),
             _ => []
         };
     }
@@ -94,7 +95,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             return [];
         }
 
-        if (command.Payload.GimbalDeviceId is not 0 and not GimbalDeviceInstanceId)
+        if (command.Payload.GimbalDeviceId is not 0 and not GimbalDeviceComponentId)
         {
             return [];
         }
@@ -112,6 +113,64 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             context.Log.Write("GIMBAL_MANAGER_SET_ATTITUDE ignored invalid quaternion");
         }
 
+        return [];
+    }
+
+    private IEnumerable<OutgoingMessage> HandleDeviceSetAttitude(
+        MavlinkMessageContext context)
+    {
+        GimbalDeviceSetAttitudePacket command;
+        try
+        {
+            command = new GimbalDeviceSetAttitudePacket();
+            var readSpan = context.Frame.Span;
+            command.Deserialize(ref readSpan);
+        }
+        catch (Exception exception)
+        {
+            context.Log.Write($"GIMBAL_DEVICE_SET_ATTITUDE decode failed: {exception}");
+            return [];
+        }
+
+        // Device setpoints control one MAVLink gimbal component; do not consume broadcast setpoints.
+        if (command.Payload.TargetSystem != SystemId || command.Payload.TargetComponent != ComponentId)
+        {
+            return [];
+        }
+
+        if (!TryGetYawFrame(command.Payload.Flags, out var yawFrame, out var unsupportedFlags))
+        {
+            context.Log.Write($"GIMBAL_DEVICE_SET_ATTITUDE rejected unsupported flags: {unsupportedFlags}");
+            return [];
+        }
+
+        var quaternion = new GimbalQuaternion(
+            command.Payload.Q[0], command.Payload.Q[1],
+            command.Payload.Q[2], command.Payload.Q[3]);
+
+        var allQuaternionValuesAreNaN =
+            float.IsNaN(quaternion.W) && float.IsNaN(quaternion.X) &&
+            float.IsNaN(quaternion.Y) && float.IsNaN(quaternion.Z);
+
+        if (allQuaternionValuesAreNaN)
+        {
+            gimbal.SetRates(
+                command.Payload.AngularVelocityX,
+                command.Payload.AngularVelocityY,
+                command.Payload.AngularVelocityZ);
+        }
+        else if (!gimbal.SetAttitude(
+                     quaternion,
+                     command.Payload.AngularVelocityX,
+                     command.Payload.AngularVelocityY,
+                     command.Payload.AngularVelocityZ))
+        {
+            context.Log.Write("GIMBAL_DEVICE_SET_ATTITUDE rejected an invalid quaternion");
+            return [];
+        }
+
+        gimbal.SetYawFrame(yawFrame);
+        LogDeviceSetAttitude(context, command, allQuaternionValuesAreNaN);
         return [];
     }
 
@@ -136,6 +195,10 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         packet.Payload.Uid = 0x4D_44_53_47_49_4D_42_4CUL;
         packet.Payload.FirmwareVersion = PackVersion(1, 0, 0, 0);
         packet.Payload.HardwareVersion = 1;
+        packet.Payload.CapFlags =
+            GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasRollAxis |
+            GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasPitchAxis |
+            GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasYawAxis;
         packet.Payload.RollMin = gimbal.Limits.RollMinRadians;
         packet.Payload.RollMax = gimbal.Limits.RollMaxRadians;
         packet.Payload.PitchMin = gimbal.Limits.PitchMinRadians;
@@ -145,7 +208,8 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         CreateFixedName("MavlinkDeviceServer").CopyTo(packet.Payload.VendorName, 0);
         CreateFixedName("Fake Gimbal").CopyTo(packet.Payload.ModelName, 0);
         CreateFixedName("Fake MAVLink Gimbal").CopyTo(packet.Payload.CustomName, 0);
-        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        // This MAVLink device is managed by the separate ArduPilot component.
+        packet.Payload.GimbalDeviceId = 0;
         return packet;
     }
 
@@ -163,7 +227,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             GimbalManagerCapFlags.GimbalManagerCapFlagsHasRollAxis |
             GimbalManagerCapFlags.GimbalManagerCapFlagsHasPitchAxis |
             GimbalManagerCapFlags.GimbalManagerCapFlagsHasYawAxis;
-        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        packet.Payload.GimbalDeviceId = GimbalDeviceComponentId;
         packet.Payload.RollMin = gimbal.Limits.RollMinRadians;
         packet.Payload.RollMax = gimbal.Limits.RollMaxRadians;
         packet.Payload.PitchMin = gimbal.Limits.PitchMinRadians;
@@ -196,7 +260,10 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         packet.Payload.AngularVelocityX = state.RollRateRadiansPerSecond;
         packet.Payload.AngularVelocityY = state.PitchRateRadiansPerSecond;
         packet.Payload.AngularVelocityZ = state.YawRateRadiansPerSecond;
-        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        packet.Payload.Flags = state.YawFrame == GimbalYawFrame.Earth
+            ? GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame
+            : GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame;
+        packet.Payload.GimbalDeviceId = 0;
         return packet;
     }
 
@@ -226,8 +293,58 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         };
 
         packet.Payload.TimeBootMs = BootTimeMilliseconds();
-        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        packet.Payload.GimbalDeviceId = GimbalDeviceComponentId;
         return packet;
+    }
+
+    private static bool TryGetYawFrame(
+        GimbalDeviceFlags flags,
+        out GimbalYawFrame yawFrame,
+        out GimbalDeviceFlags unsupportedFlags)
+    {
+        var yawInVehicleFrame = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame);
+        var yawInEarthFrame = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame);
+        var yawLock = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawLock);
+        var supportedFlags =
+            GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame |
+            GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame |
+            GimbalDeviceFlags.GimbalDeviceFlagsYawLock;
+
+        unsupportedFlags = flags & ~supportedFlags;
+        if (yawInVehicleFrame && yawInEarthFrame)
+        {
+            unsupportedFlags |= GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame |
+                                GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame;
+            yawFrame = GimbalYawFrame.Vehicle;
+            return false;
+        }
+
+        if (unsupportedFlags != 0)
+        {
+            yawFrame = GimbalYawFrame.Vehicle;
+            return false;
+        }
+
+        yawFrame = yawInEarthFrame || (!yawInVehicleFrame && yawLock)
+            ? GimbalYawFrame.Earth
+            : GimbalYawFrame.Vehicle;
+        return true;
+    }
+
+    private static void LogDeviceSetAttitude(
+        MavlinkMessageContext context,
+        GimbalDeviceSetAttitudePacket command,
+        bool rateOnly)
+    {
+        var message =
+            $"GIMBAL_DEVICE_SET_ATTITUDE from {context.Source.SystemId}/{context.Source.ComponentId}\n" +
+            $"  Target: {command.Payload.TargetSystem}/{command.Payload.TargetComponent}\n" +
+            $"  Flags: {command.Payload.Flags}\n" +
+            $"  Quaternion: [{command.Payload.Q[0]}, {command.Payload.Q[1]}, {command.Payload.Q[2]}, {command.Payload.Q[3]}]" +
+            (rateOnly ? " (rate-only)" : string.Empty) + "\n" +
+            $"  Angular velocity: [{command.Payload.AngularVelocityX}, {command.Payload.AngularVelocityY}, {command.Payload.AngularVelocityZ}]";
+        Console.WriteLine(message);
+        context.Log.Write(message.Replace(Environment.NewLine, " | "));
     }
 
     private static uint BootTimeMilliseconds() =>

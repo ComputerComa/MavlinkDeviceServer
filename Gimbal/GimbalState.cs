@@ -22,7 +22,14 @@ public sealed record GimbalState(
     float YawRadians,
     float RollRateRadiansPerSecond,
     float PitchRateRadiansPerSecond,
-    float YawRateRadiansPerSecond);
+    float YawRateRadiansPerSecond,
+    GimbalYawFrame YawFrame);
+
+public enum GimbalYawFrame
+{
+    Vehicle,
+    Earth
+}
 
 public readonly record struct GimbalQuaternion(float W, float X, float Y, float Z)
 {

@@ -5,7 +5,7 @@ namespace MavlinkDeviceServer.Mavlink;
 
 public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegistry components, DebugLog log)
 {
-    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 282 => ProcessGimbalManagerSetAttitude(context), _ => [] };
+    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 282 => ProcessGimbalManagerSetAttitude(context), 284 => ProcessGimbalDeviceSetAttitude(context), _ => [] };
     public IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => components.Components.SelectMany(x => x.GetPeriodicMessages(now));
     private IEnumerable<OutgoingMessage> ProcessHeartbeat(MavlinkMessageContext context)
     {
@@ -27,6 +27,19 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
         GimbalManagerSetAttitudePacket command;
         try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); }
         catch (Exception exception) { log.Write($"GIMBAL_MANAGER_SET_ATTITUDE decode failed: {exception}"); return []; }
+
+        if (!TargetsThisSystem(command.Payload.TargetSystem)) return [];
+        WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);
+        return components
+            .GetMessageRecipients(context.MessageId, command.Payload.TargetSystem, command.Payload.TargetComponent)
+            .SelectMany(x => x.HandleMessage(context))
+            .ToList();
+    }
+    private IEnumerable<OutgoingMessage> ProcessGimbalDeviceSetAttitude(MavlinkMessageContext context)
+    {
+        GimbalDeviceSetAttitudePacket command;
+        try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); }
+        catch (Exception exception) { log.Write($"GIMBAL_DEVICE_SET_ATTITUDE decode failed: {exception}"); return []; }
 
         if (!TargetsThisSystem(command.Payload.TargetSystem)) return [];
         WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);

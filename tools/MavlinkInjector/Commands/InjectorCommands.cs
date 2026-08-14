@@ -9,7 +9,7 @@ public static class InjectorCommands
 {
     private const uint GimbalManagerInformationMessageId = 280;
     private const uint GimbalDeviceInformationMessageId = 283;
-    private const byte GimbalDeviceInstanceId = 1;
+    private const byte GimbalDeviceComponentId = 154;
 
     public static async Task<int> RunGimbalInfoAsync(GimbalInfoOptions options)
         => await SendMessageRequestAsync(
@@ -57,6 +57,11 @@ public static class InjectorCommands
             ? Task.FromResult(InvalidAngles())
             : SendGimbalAttitudeAsync(options, options.Roll, options.Pitch, options.Yaw);
 
+    public static Task<int> RunGimbalDeviceSetAttitudeAsync(GimbalDeviceSetAttitudeOptions options) =>
+        !float.IsFinite(options.Roll) || !float.IsFinite(options.Pitch) || !float.IsFinite(options.Yaw)
+            ? Task.FromResult(InvalidAngles())
+            : SendGimbalDeviceAttitudeAsync(options, options.Roll, options.Pitch, options.Yaw);
+
     public static Task<int> RunGimbalCenterAsync(GimbalCenterOptions options) =>
         SendGimbalAttitudeAsync(options, 0f, 0f, 0f);
 
@@ -78,7 +83,7 @@ public static class InjectorCommands
 
         packet.Payload.TargetSystem = options.TargetSystem;
         packet.Payload.TargetComponent = options.TargetComponent;
-        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        packet.Payload.GimbalDeviceId = GimbalDeviceComponentId;
         packet.Payload.Q[0] = quaternion.W;
         packet.Payload.Q[1] = quaternion.X;
         packet.Payload.Q[2] = quaternion.Y;
@@ -89,6 +94,32 @@ public static class InjectorCommands
 
         return await SendAsync(packet, options, VerifyGimbalAttitude,
             "GIMBAL_MANAGER_SET_ATTITUDE",
+            $"roll={roll:F1} deg, pitch={pitch:F1} deg, yaw={yaw:F1} deg");
+    }
+
+    private static async Task<int> SendGimbalDeviceAttitudeAsync(CommonInjectorOptions options, float roll, float pitch, float yaw)
+    {
+        var quaternion = EulerDegreesToQuaternion(roll, pitch, yaw);
+        var packet = new GimbalDeviceSetAttitudePacket
+        {
+            SystemId = options.SourceSystem,
+            ComponentId = options.SourceComponent,
+            Sequence = 0
+        };
+
+        packet.Payload.TargetSystem = options.TargetSystem;
+        packet.Payload.TargetComponent = options.TargetComponent;
+        packet.Payload.Flags = GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame;
+        packet.Payload.Q[0] = quaternion.W;
+        packet.Payload.Q[1] = quaternion.X;
+        packet.Payload.Q[2] = quaternion.Y;
+        packet.Payload.Q[3] = quaternion.Z;
+        packet.Payload.AngularVelocityX = float.NaN;
+        packet.Payload.AngularVelocityY = float.NaN;
+        packet.Payload.AngularVelocityZ = float.NaN;
+
+        return await SendAsync(packet, options, VerifyGimbalDeviceAttitude,
+            "GIMBAL_DEVICE_SET_ATTITUDE",
             $"roll={roll:F1} deg, pitch={pitch:F1} deg, yaw={yaw:F1} deg");
     }
 
@@ -151,9 +182,23 @@ public static class InjectorCommands
 
         if (packet.SystemId != options.SourceSystem || packet.ComponentId != options.SourceComponent ||
             packet.Payload.TargetSystem != options.TargetSystem || packet.Payload.TargetComponent != options.TargetComponent ||
-            packet.Payload.GimbalDeviceId != GimbalDeviceInstanceId)
+            packet.Payload.GimbalDeviceId != GimbalDeviceComponentId)
         {
             throw new InvalidOperationException("Encoded GIMBAL_MANAGER_SET_ATTITUDE did not match the requested command.");
+        }
+    }
+
+    private static void VerifyGimbalDeviceAttitude(byte[] frame, CommonInjectorOptions options)
+    {
+        var packet = new GimbalDeviceSetAttitudePacket();
+        ReadOnlySpan<byte> readSpan = frame;
+        packet.Deserialize(ref readSpan);
+
+        if (packet.SystemId != options.SourceSystem || packet.ComponentId != options.SourceComponent ||
+            packet.Payload.TargetSystem != options.TargetSystem || packet.Payload.TargetComponent != options.TargetComponent ||
+            packet.Payload.Flags != GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame)
+        {
+            throw new InvalidOperationException("Encoded GIMBAL_DEVICE_SET_ATTITUDE did not match the requested command.");
         }
     }
 
