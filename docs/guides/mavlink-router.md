@@ -1,6 +1,6 @@
 # mavlink-router setup
 
-The checked-in [mavlink-router.cfg](../../mavlink-router.cfg) documents the
+The checked-in [mavlink-router.cfg](https://github.com/ComputerComa/MavlinkDeviceServer/blob/master/mavlink-router.cfg) documents the
 local test topology.
 
 | Endpoint | Port | Role |
