@@ -18,9 +18,26 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
         if (context.Frame.Span[0] != 0xFD) return [];
         CommandLongPacket command; try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); } catch (Exception exception) { Console.WriteLine($"Failed to decode COMMAND_LONG: {exception.Message}"); log.Write($"COMMAND_LONG decode failed: {exception}"); return []; }
         if (!TargetsThisSystem(command.Payload.TargetSystem)) return [];
-        WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);
-        var recipients = components.GetMessageRecipients(context.MessageId, command.Payload.TargetSystem, command.Payload.TargetComponent).ToList();
-        return recipients.SelectMany(x => x.HandleMessage(context)).ToList();
+        if (command.Payload.TargetComponent != 0 &&
+            !components.Contains(deviceSystemId, command.Payload.TargetComponent)) return [];
+
+        if (command.Payload.Command == MavCmd.MavCmdRequestMessage)
+        {
+            var requestedMessageId = (uint)Math.Max(0, command.Payload.Param1);
+            var recipient = components.GetRequestMessageRecipient(
+                requestedMessageId,
+                command.Payload.TargetSystem,
+                command.Payload.TargetComponent);
+            return recipient is null ? [] : recipient.HandleMessage(context).ToList();
+        }
+
+        // A broadcast COMMAND_LONG has no single component responsible for its ACK.
+        if (command.Payload.TargetComponent == 0) return [];
+        var target = components.GetMessageRecipients(
+            context.MessageId,
+            command.Payload.TargetSystem,
+            command.Payload.TargetComponent).SingleOrDefault();
+        return target is null ? [] : target.HandleMessage(context).ToList();
     }
     private IEnumerable<OutgoingMessage> ProcessGimbalManagerSetAttitude(MavlinkMessageContext context)
     {

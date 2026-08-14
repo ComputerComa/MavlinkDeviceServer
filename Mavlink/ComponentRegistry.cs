@@ -9,6 +9,20 @@ public sealed class ComponentRegistry
     public bool Contains(byte systemId, byte componentId) =>
         _components.Any(x => x.SystemId == systemId && x.ComponentId == componentId);
 
+    public IMavlinkComponent? GetRequestMessageRecipient(
+        uint requestedMessageId,
+        byte targetSystem,
+        byte targetComponent)
+    {
+        var recipients = _components.Where(x =>
+            x.HandledRequestMessageIds.Contains(requestedMessageId) &&
+            (targetSystem == 0 || targetSystem == x.SystemId) &&
+            (targetComponent == 0 || targetComponent == x.ComponentId))
+            .Take(2)
+            .ToList();
+        return recipients.Count == 1 ? recipients[0] : null;
+    }
+
     public IEnumerable<IMavlinkComponent> GetMessageRecipients(uint messageId, byte targetSystem, byte targetComponent)
     {
         // TODO: Define an explicit broadcast COMMAND_LONG policy before broader GCS interoperability testing.

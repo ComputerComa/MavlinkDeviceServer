@@ -7,6 +7,7 @@ public sealed class OnboardComputerComponent(byte systemId, byte componentId) : 
 {
     private const uint CommandLongMessageId = 76, OnboardComputerStatusMessageId = 390; private int _statusCounter;
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } = [CommandLongMessageId];
+    public override IReadOnlyCollection<uint> HandledRequestMessageIds { get; } = [OnboardComputerStatusMessageId];
     public override IEnumerable<OutgoingMessage> HandleMessage(MavlinkMessageContext context)
     {
         if (context.Frame.Span[0] != 0xFD) return [];

@@ -1,0 +1,10 @@
+{
+  "MavlinkInjector": {
+    "Host": "127.0.0.1",
+    "Port": 14552,
+    "SourceSystem": 255,
+    "SourceComponent": 190,
+    "TargetSystem": 1,
+    "TargetComponent": 154
+  }
+}

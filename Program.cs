@@ -34,7 +34,6 @@ internal static class Program
 
         components.Register(new OnboardComputerComponent(DeviceSystemId, (byte)MavComponent.MavCompIdOnboardComputer));
         components.Register(new GimbalComponent(DeviceSystemId, gimbalDeviceComponentId, gimbal));
-        components.Register(new CameraComponent(DeviceSystemId, 100));
 
         var dispatcher = new MavlinkMessageDispatcher(DeviceSystemId, components, debugLog);
         var server = new MavlinkServer(listenEndpoint, dispatcher, debugLog);

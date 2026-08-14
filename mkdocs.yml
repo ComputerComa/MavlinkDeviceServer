@@ -1,0 +1,26 @@
+site_name: MavlinkDeviceServer
+site_description: MAVLink gimbal-device companion-computer bridge
+site_url: https://computercoma.github.io/MavlinkDeviceServer/
+repo_url: https://github.com/ComputerComa/MavlinkDeviceServer
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - content.code.copy
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+nav:
+  - Overview: index.md
+  - Architecture: architecture.md
+  - Guides:
+      - SITL setup: guides/sitl.md
+      - mavlink-router setup: guides/mavlink-router.md
+      - Gimbal device integration: guides/gimbal-device.md
+      - Injector: guides/injector.md
+      - Injector configuration: guides/injector-configuration.md
+  - Reference:
+      - Injector commands: reference/mavlink-injector.md
+  - Operations:
+      - Troubleshooting: operations/troubleshooting.md

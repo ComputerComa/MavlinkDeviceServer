@@ -21,4 +21,17 @@ public abstract class CommonInjectorOptions
 
     [Option("target-component", Default = (byte)154, HelpText = "Target MAVLink component ID.")]
     public byte TargetComponent { get; set; } = 154;
+
+    public CommonInjectorOptions ApplyConfiguredDefaults(
+        InjectorDefaults defaults,
+        ISet<string> suppliedOptions)
+    {
+        if (!suppliedOptions.Contains("host")) Host = defaults.Host;
+        if (!suppliedOptions.Contains("port")) Port = defaults.Port;
+        if (!suppliedOptions.Contains("source-system")) SourceSystem = defaults.SourceSystem;
+        if (!suppliedOptions.Contains("source-component")) SourceComponent = defaults.SourceComponent;
+        if (!suppliedOptions.Contains("target-system")) TargetSystem = defaults.TargetSystem;
+        if (!suppliedOptions.Contains("target-component")) TargetComponent = defaults.TargetComponent;
+        return this;
+    }
 }

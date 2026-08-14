@@ -1,0 +1,18 @@
+MAV1_ADSB 0
+MAV1_EXT_STAT 0
+MAV1_EXTRA1 0
+MAV1_EXTRA2 0
+MAV1_EXTRA3 0
+MAV1_PARAMS 0
+MAV1_POSITION 0
+MAV1_RAW_CTRL 0
+MAV1_RAW_SENS 0
+MAV1_RC_CHAN 0
+MNT1_TYPE 6
+# Large simulated battery for extended gimbal/camera testing.
+# SIM_BATT_CAP_AH is in Ah; BATT_CAPACITY is in mAh.
+SIM_BATT_CAP_AH 100
+BATT_CAPACITY 100000
+
+# Reduce simulated voltage sag under load.
+SIM_BATT_RES_OHM 0.01

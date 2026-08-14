@@ -179,6 +179,9 @@ DocProject/Help/html
 # Click-Once directory
 publish/
 
+# Local MAVLink injector defaults (the checked-in .example file is the template).
+mavlink-injector.json
+
 # Publish Web Output
 *.[Pp]ublish.xml
 *.azurePubxml

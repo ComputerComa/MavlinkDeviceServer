@@ -20,6 +20,9 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } =
         [CommandLongMessageId, GimbalManagerSetAttitudeMessageId, GimbalDeviceSetAttitudeMessageId,
             AutopilotStateForGimbalDeviceMessageId];
+    public override IReadOnlyCollection<uint> HandledRequestMessageIds { get; } =
+        [GimbalManagerInformationMessageId, GimbalDeviceInformationMessageId,
+            GimbalDeviceAttitudeStatusMessageId];
 
     public override IEnumerable<OutgoingMessage> HandleMessage(
         MavlinkMessageContext context)
