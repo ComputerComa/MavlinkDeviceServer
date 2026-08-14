@@ -3,7 +3,7 @@ using Asv.Mavlink.Minimal;
 using MavlinkDeviceServer.Logging;
 namespace MavlinkDeviceServer.Mavlink;
 
-public sealed class MavlinkRouter(byte deviceSystemId, ComponentRegistry components, DebugLog log)
+public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegistry components, DebugLog log)
 {
     public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), _ => [] };
     public IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => components.Components.SelectMany(x => x.GetPeriodicMessages(now));

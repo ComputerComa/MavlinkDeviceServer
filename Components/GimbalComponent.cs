@@ -73,7 +73,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId)
 
         packet.Payload.TimeBootMs = BootTimeMilliseconds();
         packet.Payload.Uid = 0x4D_44_53_47_49_4D_42_4CUL;
-        packet.Payload.FirmwareVersion = 0x01000000;
+        packet.Payload.FirmwareVersion = PackVersion(1, 0, 0, 0);
         packet.Payload.HardwareVersion = 1;
         packet.Payload.RollMin = -0.7854f;
         packet.Payload.RollMax = 0.7854f;
@@ -84,7 +84,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId)
         CreateFixedName("MavlinkDeviceServer").CopyTo(packet.Payload.VendorName, 0);
         CreateFixedName("Fake Gimbal").CopyTo(packet.Payload.ModelName, 0);
         CreateFixedName("Fake MAVLink Gimbal").CopyTo(packet.Payload.CustomName, 0);
-        packet.Payload.GimbalDeviceId = ComponentId;
+        packet.Payload.GimbalDeviceId = 0;
         return packet;
     }
 
@@ -99,12 +99,18 @@ public sealed class GimbalComponent(byte systemId, byte componentId)
 
         packet.Payload.TimeBootMs = BootTimeMilliseconds();
         packet.Payload.Q[0] = 1f;
-        packet.Payload.GimbalDeviceId = ComponentId;
+        packet.Payload.GimbalDeviceId = 0;
         return packet;
     }
 
     private static uint BootTimeMilliseconds() =>
         unchecked((uint)Environment.TickCount64);
+
+    private static uint PackVersion(byte major, byte minor, byte patch, byte dev) =>
+        ((uint)dev << 24) |
+        ((uint)patch << 16) |
+        ((uint)minor << 8) |
+        major;
 
     private static char[] CreateFixedName(string value)
     {

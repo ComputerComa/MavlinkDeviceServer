@@ -4,7 +4,7 @@ using System.Net.Sockets;
 using MavlinkDeviceServer.Logging;
 namespace MavlinkDeviceServer.Mavlink;
 
-public sealed class MavlinkServer(IPEndPoint listenEndpoint, MavlinkRouter router, DebugLog log)
+public sealed class MavlinkServer(IPEndPoint listenEndpoint, MavlinkMessageDispatcher dispatcher, DebugLog log)
 {
     private readonly ConcurrentDictionary<(byte SystemId, byte ComponentId), byte> _discoveredComponents = new();
     public async Task RunAsync(CancellationToken cancellationToken)
@@ -30,13 +30,13 @@ public sealed class MavlinkServer(IPEndPoint listenEndpoint, MavlinkRouter route
             var offset = MavlinkCodec.FindNextFrame(remaining); if (offset < 0) { log.Write($"RX {endpoint} ignored {remaining.Length} non-MAVLink bytes"); break; }
             if (offset > 0) { log.Write($"RX {endpoint} skipped {offset} bytes before MAVLink frame"); remaining = remaining[offset..]; }
             if (!MavlinkCodec.TryGetFrameLength(remaining, out var length)) { log.Write($"RX {endpoint} incomplete frame; remaining={remaining.Length}"); break; }
-            var frame = remaining[..length]; var messageId = MavlinkCodec.GetMessageId(frame); var source = MavlinkCodec.GetSourceIdentity(frame); log.WriteFrame("RX", endpoint, $"MSG={messageId} SYS={source.SystemId} COMP={source.ComponentId}", frame); DiscoverComponent(source, messageId); responses.AddRange(router.Route(new MavlinkMessageContext(messageId, frame.ToArray(), endpoint, log))); remaining = remaining[length..];
+            var frame = remaining[..length]; var messageId = MavlinkCodec.GetMessageId(frame); var source = MavlinkCodec.GetSourceIdentity(frame); log.WriteFrame("RX", endpoint, $"MSG={messageId} SYS={source.SystemId} COMP={source.ComponentId}", frame); DiscoverComponent(source, messageId); responses.AddRange(dispatcher.Route(new MavlinkMessageContext(messageId, frame.ToArray(), endpoint, log))); remaining = remaining[length..];
         }
         return responses;
     }
     private void DiscoverComponent(MavlinkIdentity source, uint messageId) { if (source.SystemId == 0 || !_discoveredComponents.TryAdd((source.SystemId, source.ComponentId), 0)) return; Console.WriteLine($"Discovered MAVLink component {source.SystemId}/{source.ComponentId} from message {messageId}"); log.Write($"Discovered component {source.SystemId}/{source.ComponentId}"); }
     private async Task SendPeriodicTelemetryAsync(UdpClient socket, Func<IPEndPoint?> getRemoteEndpoint, CancellationToken cancellationToken)
     {
-        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1)); while (await timer.WaitForNextTickAsync(cancellationToken)) { var destination = getRemoteEndpoint(); if (destination is null) continue; foreach (var message in router.GetPeriodicMessages(DateTimeOffset.UtcNow)) { var frame = MavlinkCodec.Encode(message.Packet); await socket.SendAsync(frame, destination, cancellationToken); await log.WriteFrameAsync("TX", destination, message.Description, frame); } }
+        using var timer = new PeriodicTimer(TimeSpan.FromSeconds(1)); while (await timer.WaitForNextTickAsync(cancellationToken)) { var destination = getRemoteEndpoint(); if (destination is null) continue; foreach (var message in dispatcher.GetPeriodicMessages(DateTimeOffset.UtcNow)) { var frame = MavlinkCodec.Encode(message.Packet); await socket.SendAsync(frame, destination, cancellationToken); await log.WriteFrameAsync("TX", destination, message.Description, frame); } }
     }
 }

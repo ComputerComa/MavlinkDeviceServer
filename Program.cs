@@ -32,8 +32,8 @@ internal static class Program
         components.Register(new GimbalComponent(DeviceSystemId, 154));
         components.Register(new CameraComponent(DeviceSystemId, 100));
 
-        var router = new MavlinkRouter(DeviceSystemId, components, debugLog);
-        var server = new MavlinkServer(listenEndpoint, router, debugLog);
+        var dispatcher = new MavlinkMessageDispatcher(DeviceSystemId, components, debugLog);
+        var server = new MavlinkServer(listenEndpoint, dispatcher, debugLog);
 
         Console.WriteLine("MAVLink Device Server — SITL test");
         Console.WriteLine($"Listening: {listenEndpoint}");
