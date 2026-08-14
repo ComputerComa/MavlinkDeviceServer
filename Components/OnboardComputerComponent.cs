@@ -9,7 +9,7 @@ public sealed class OnboardComputerComponent(byte systemId, byte componentId) : 
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } = [CommandLongMessageId];
     public override IEnumerable<OutgoingMessage> HandleMessage(MavlinkMessageContext context)
     {
-        if (context.Frame.Span[0] != 0xFD) { context.Log.Write("MAVLink 1 COMMAND_LONG received but ignored"); return []; }
+        if (context.Frame.Span[0] != 0xFD) return [];
         CommandLongPacket command; try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); } catch (Exception exception) { Console.WriteLine($"Failed to decode COMMAND_LONG: {exception.Message}"); context.Log.Write($"COMMAND_LONG decode failed: {exception}"); return []; }
         if (command.Payload.Command == MavCmd.MavCmdRequestMessage) return HandleRequestMessage(command, context.Log);
         Console.WriteLine("  Result: Unsupported command"); Console.WriteLine(); context.Log.Write($"COMMAND_LONG unsupported: {command.Payload.Command}");

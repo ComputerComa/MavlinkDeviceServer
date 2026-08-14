@@ -9,19 +9,18 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
     public IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => components.Components.SelectMany(x => x.GetPeriodicMessages(now));
     private IEnumerable<OutgoingMessage> ProcessHeartbeat(MavlinkMessageContext context)
     {
-        if (context.Frame.Span[0] != 0xFD) { log.Write("MAVLink 1 HEARTBEAT received; this prototype decodes MAVLink 2 only"); return []; }
+        if (context.Frame.Span[0] != 0xFD) return [];
         try { var packet = new HeartbeatPacket(); var readSpan = context.Frame.Span; packet.Deserialize(ref readSpan); log.Write($"HEARTBEAT decoded SYS={packet.SystemId} COMP={packet.ComponentId} TYPE={packet.Payload.Type} AUTOPILOT={packet.Payload.Autopilot} STATE={packet.Payload.SystemStatus} BASE_MODE={packet.Payload.BaseMode}"); } catch (Exception exception) { Console.WriteLine($"Failed to decode HEARTBEAT: {exception.Message}"); log.Write($"HEARTBEAT decode failed: {exception}"); }
         return [];
     }
     private IEnumerable<OutgoingMessage> ProcessCommandLong(MavlinkMessageContext context)
     {
-        if (context.Frame.Span[0] != 0xFD) { log.Write("MAVLink 1 COMMAND_LONG received but ignored"); return []; }
+        if (context.Frame.Span[0] != 0xFD) return [];
         CommandLongPacket command; try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); } catch (Exception exception) { Console.WriteLine($"Failed to decode COMMAND_LONG: {exception.Message}"); log.Write($"COMMAND_LONG decode failed: {exception}"); return []; }
-        Console.WriteLine($"COMMAND_LONG received from {command.SystemId}/{command.ComponentId}"); Console.WriteLine($"  Command: {command.Payload.Command}"); Console.WriteLine($"  Target:  {command.Payload.TargetSystem}/{command.Payload.TargetComponent}"); Console.WriteLine($"  Param 1: {command.Payload.Param1}");
-        log.Write($"COMMAND_LONG decoded SOURCE={command.SystemId}/{command.ComponentId} TARGET={command.Payload.TargetSystem}/{command.Payload.TargetComponent} COMMAND={command.Payload.Command} CONFIRMATION={command.Payload.Confirmation} PARAMS=[{command.Payload.Param1}, {command.Payload.Param2}, {command.Payload.Param3}, {command.Payload.Param4}, {command.Payload.Param5}, {command.Payload.Param6}, {command.Payload.Param7}]");
-        if (command.Payload.TargetSystem != 0 && command.Payload.TargetSystem != deviceSystemId) return Ignore();
+        if (!TargetsThisSystem(command.Payload.TargetSystem)) return [];
+        WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);
         var recipients = components.GetMessageRecipients(context.MessageId, command.Payload.TargetSystem, command.Payload.TargetComponent).ToList();
-        return recipients.Count == 0 ? Ignore() : recipients.SelectMany(x => x.HandleMessage(context)).ToList();
+        return recipients.SelectMany(x => x.HandleMessage(context)).ToList();
     }
     private IEnumerable<OutgoingMessage> ProcessGimbalManagerSetAttitude(MavlinkMessageContext context)
     {
@@ -29,11 +28,32 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
         try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); }
         catch (Exception exception) { log.Write($"GIMBAL_MANAGER_SET_ATTITUDE decode failed: {exception}"); return []; }
 
-        if (command.Payload.TargetSystem != 0 && command.Payload.TargetSystem != deviceSystemId) return [];
+        if (!TargetsThisSystem(command.Payload.TargetSystem)) return [];
+        WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);
         return components
             .GetMessageRecipients(context.MessageId, command.Payload.TargetSystem, command.Payload.TargetComponent)
             .SelectMany(x => x.HandleMessage(context))
             .ToList();
     }
-    private IEnumerable<OutgoingMessage> Ignore() { Console.WriteLine("  Ignored: command targets another component."); Console.WriteLine(); log.Write("COMMAND_LONG ignored because target does not match"); return []; }
+
+    private bool TargetsThisSystem(byte targetSystem) =>
+        targetSystem == 0 || targetSystem == deviceSystemId;
+
+    private void WarnIfTargetedAtUnregisteredComponent(
+        MavlinkMessageContext context,
+        byte targetSystem,
+        byte targetComponent)
+    {
+        if (targetComponent == 0 || !TargetsThisSystem(targetSystem) ||
+            components.Contains(deviceSystemId, targetComponent))
+        {
+            return;
+        }
+
+        var warning =
+            $"WARNING: MAVLink message {context.MessageId} from {context.Source.SystemId}/{context.Source.ComponentId} " +
+            $"targets {targetSystem}/{targetComponent}, but this server has no such component.";
+        Console.WriteLine(warning);
+        log.Write(warning);
+    }
 }

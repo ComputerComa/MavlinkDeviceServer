@@ -9,6 +9,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     : MavlinkComponentBase(systemId, componentId)
 {
     private const uint CommandLongMessageId = 76;
+    private const uint GimbalManagerInformationMessageId = 280;
     private const uint GimbalManagerSetAttitudeMessageId = 282;
     private const uint GimbalDeviceInformationMessageId = 283;
     private const uint GimbalDeviceAttitudeStatusMessageId = 285;
@@ -58,6 +59,11 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         var requestedMessageId = (uint)Math.Max(0, command.Payload.Param1);
         return requestedMessageId switch
         {
+            GimbalManagerInformationMessageId =>
+            [
+                new(CreateManagerInformation(), "GIMBAL_MANAGER_INFORMATION requested response"),
+                Accepted(command)
+            ],
             GimbalDeviceInformationMessageId =>
             [
                 new(CreateDeviceInformation(), "GIMBAL_DEVICE_INFORMATION requested response"),
@@ -140,6 +146,30 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         CreateFixedName("Fake Gimbal").CopyTo(packet.Payload.ModelName, 0);
         CreateFixedName("Fake MAVLink Gimbal").CopyTo(packet.Payload.CustomName, 0);
         packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        return packet;
+    }
+
+    private GimbalManagerInformationPacket CreateManagerInformation()
+    {
+        var packet = new GimbalManagerInformationPacket
+        {
+            SystemId = SystemId,
+            ComponentId = ComponentId,
+            Sequence = NextSequence()
+        };
+
+        packet.Payload.TimeBootMs = BootTimeMilliseconds();
+        packet.Payload.CapFlags =
+            GimbalManagerCapFlags.GimbalManagerCapFlagsHasRollAxis |
+            GimbalManagerCapFlags.GimbalManagerCapFlagsHasPitchAxis |
+            GimbalManagerCapFlags.GimbalManagerCapFlagsHasYawAxis;
+        packet.Payload.GimbalDeviceId = GimbalDeviceInstanceId;
+        packet.Payload.RollMin = gimbal.Limits.RollMinRadians;
+        packet.Payload.RollMax = gimbal.Limits.RollMaxRadians;
+        packet.Payload.PitchMin = gimbal.Limits.PitchMinRadians;
+        packet.Payload.PitchMax = gimbal.Limits.PitchMaxRadians;
+        packet.Payload.YawMin = gimbal.Limits.YawMinRadians;
+        packet.Payload.YawMax = gimbal.Limits.YawMaxRadians;
         return packet;
     }
 
