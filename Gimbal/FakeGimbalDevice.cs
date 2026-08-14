@@ -4,12 +4,18 @@ public sealed class FakeGimbalDevice : IGimbalDevice
 {
     private readonly object _sync = new();
     private GimbalState _state = new(0, 0, 0, 0, 0, 0, GimbalYawFrame.Vehicle);
+    private GimbalAutopilotState? _autopilotState;
 
     public GimbalLimits Limits => GimbalLimits.Fake;
 
     public GimbalState State
     {
         get { lock (_sync) return _state; }
+    }
+
+    public GimbalAutopilotState? AutopilotState
+    {
+        get { lock (_sync) return _autopilotState; }
     }
 
     public bool SetAttitude(GimbalQuaternion attitude, float rollRate, float pitchRate, float yawRate)
@@ -49,6 +55,14 @@ public sealed class FakeGimbalDevice : IGimbalDevice
         lock (_sync)
         {
             _state = _state with { YawFrame = yawFrame };
+        }
+    }
+
+    public void SetAutopilotState(GimbalAutopilotState autopilotState)
+    {
+        lock (_sync)
+        {
+            _autopilotState = autopilotState;
         }
     }
 

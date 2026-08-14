@@ -13,4 +13,19 @@ public sealed class GimbalDeviceSetAttitudeOptions : CommonInjectorOptions
 
     [Option("roll", Default = 0f, HelpText = "Requested roll in degrees.")]
     public float Roll { get; set; }
+
+    [Option("earth-frame", HelpText = "Set yaw in the earth frame.")]
+    public bool EarthFrame { get; set; }
+
+    [Option("vehicle-frame", HelpText = "Set yaw in the vehicle frame (the default).")]
+    public bool VehicleFrame { get; set; }
+
+    [Option("roll-lock", HelpText = "Set the roll-lock flag.")]
+    public bool RollLock { get; set; }
+
+    [Option("pitch-lock", HelpText = "Set the pitch-lock flag.")]
+    public bool PitchLock { get; set; }
+
+    [Option("yaw-lock", HelpText = "Set the legacy yaw-lock flag.")]
+    public bool YawLock { get; set; }
 }

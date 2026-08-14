@@ -31,6 +31,12 @@ public enum GimbalYawFrame
     Earth
 }
 
+public sealed record GimbalAutopilotState(
+    ulong TimeBootMicroseconds,
+    GimbalQuaternion Attitude,
+    float AngularVelocityZRadiansPerSecond,
+    float FeedForwardAngularVelocityZRadiansPerSecond);
+
 public readonly record struct GimbalQuaternion(float W, float X, float Y, float Z)
 {
     public static GimbalQuaternion FromEuler(float roll, float pitch, float yaw)

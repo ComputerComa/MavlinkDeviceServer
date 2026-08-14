@@ -60,6 +60,8 @@ public static class InjectorCommands
     public static Task<int> RunGimbalDeviceSetAttitudeAsync(GimbalDeviceSetAttitudeOptions options) =>
         !float.IsFinite(options.Roll) || !float.IsFinite(options.Pitch) || !float.IsFinite(options.Yaw)
             ? Task.FromResult(InvalidAngles())
+            : options.EarthFrame && options.VehicleFrame
+                ? Task.FromResult(InvalidDeviceFrame())
             : SendGimbalDeviceAttitudeAsync(options, options.Roll, options.Pitch, options.Yaw);
 
     public static Task<int> RunGimbalCenterAsync(GimbalCenterOptions options) =>
@@ -68,6 +70,12 @@ public static class InjectorCommands
     private static int InvalidAngles()
     {
         Console.Error.WriteLine("Roll, pitch, and yaw must be finite numeric values.");
+        return 2;
+    }
+
+    private static int InvalidDeviceFrame()
+    {
+        Console.Error.WriteLine("Specify either --earth-frame or --vehicle-frame, not both.");
         return 2;
     }
 
@@ -97,7 +105,7 @@ public static class InjectorCommands
             $"roll={roll:F1} deg, pitch={pitch:F1} deg, yaw={yaw:F1} deg");
     }
 
-    private static async Task<int> SendGimbalDeviceAttitudeAsync(CommonInjectorOptions options, float roll, float pitch, float yaw)
+    private static async Task<int> SendGimbalDeviceAttitudeAsync(GimbalDeviceSetAttitudeOptions options, float roll, float pitch, float yaw)
     {
         var quaternion = EulerDegreesToQuaternion(roll, pitch, yaw);
         var packet = new GimbalDeviceSetAttitudePacket
@@ -109,7 +117,8 @@ public static class InjectorCommands
 
         packet.Payload.TargetSystem = options.TargetSystem;
         packet.Payload.TargetComponent = options.TargetComponent;
-        packet.Payload.Flags = GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame;
+        var flags = CreateDeviceFlags(options);
+        packet.Payload.Flags = flags;
         packet.Payload.Q[0] = quaternion.W;
         packet.Payload.Q[1] = quaternion.X;
         packet.Payload.Q[2] = quaternion.Y;
@@ -118,7 +127,7 @@ public static class InjectorCommands
         packet.Payload.AngularVelocityY = float.NaN;
         packet.Payload.AngularVelocityZ = float.NaN;
 
-        return await SendAsync(packet, options, VerifyGimbalDeviceAttitude,
+        return await SendAsync(packet, options, (frame, currentOptions) => VerifyGimbalDeviceAttitude(frame, currentOptions, flags),
             "GIMBAL_DEVICE_SET_ATTITUDE",
             $"roll={roll:F1} deg, pitch={pitch:F1} deg, yaw={yaw:F1} deg");
     }
@@ -188,7 +197,10 @@ public static class InjectorCommands
         }
     }
 
-    private static void VerifyGimbalDeviceAttitude(byte[] frame, CommonInjectorOptions options)
+    private static void VerifyGimbalDeviceAttitude(
+        byte[] frame,
+        CommonInjectorOptions options,
+        GimbalDeviceFlags expectedFlags)
     {
         var packet = new GimbalDeviceSetAttitudePacket();
         ReadOnlySpan<byte> readSpan = frame;
@@ -196,10 +208,21 @@ public static class InjectorCommands
 
         if (packet.SystemId != options.SourceSystem || packet.ComponentId != options.SourceComponent ||
             packet.Payload.TargetSystem != options.TargetSystem || packet.Payload.TargetComponent != options.TargetComponent ||
-            packet.Payload.Flags != GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame)
+            packet.Payload.Flags != expectedFlags)
         {
             throw new InvalidOperationException("Encoded GIMBAL_DEVICE_SET_ATTITUDE did not match the requested command.");
         }
+    }
+
+    private static GimbalDeviceFlags CreateDeviceFlags(GimbalDeviceSetAttitudeOptions options)
+    {
+        var flags = options.EarthFrame
+            ? GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame
+            : GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame;
+        if (options.RollLock) flags |= GimbalDeviceFlags.GimbalDeviceFlagsRollLock;
+        if (options.PitchLock) flags |= GimbalDeviceFlags.GimbalDeviceFlagsPitchLock;
+        if (options.YawLock) flags |= GimbalDeviceFlags.GimbalDeviceFlagsYawLock;
+        return flags;
     }
 
     private static (float W, float X, float Y, float Z) EulerDegreesToQuaternion(float rollDegrees, float pitchDegrees, float yawDegrees)

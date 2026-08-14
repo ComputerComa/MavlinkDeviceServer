@@ -5,7 +5,7 @@ namespace MavlinkDeviceServer.Mavlink;
 
 public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegistry components, DebugLog log)
 {
-    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 282 => ProcessGimbalManagerSetAttitude(context), 284 => ProcessGimbalDeviceSetAttitude(context), _ => [] };
+    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 282 => ProcessGimbalManagerSetAttitude(context), 284 => ProcessGimbalDeviceSetAttitude(context), 286 => ProcessAutopilotStateForGimbalDevice(context), _ => [] };
     public IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => components.Components.SelectMany(x => x.GetPeriodicMessages(now));
     private IEnumerable<OutgoingMessage> ProcessHeartbeat(MavlinkMessageContext context)
     {
@@ -45,6 +45,19 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
         WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);
         return components
             .GetMessageRecipients(context.MessageId, command.Payload.TargetSystem, command.Payload.TargetComponent)
+            .SelectMany(x => x.HandleMessage(context))
+            .ToList();
+    }
+    private IEnumerable<OutgoingMessage> ProcessAutopilotStateForGimbalDevice(MavlinkMessageContext context)
+    {
+        AutopilotStateForGimbalDevicePacket packet;
+        try { packet = new(); var readSpan = context.Frame.Span; packet.Deserialize(ref readSpan); }
+        catch (Exception exception) { log.Write($"AUTOPILOT_STATE_FOR_GIMBAL_DEVICE decode failed: {exception}"); return []; }
+
+        if (!TargetsThisSystem(packet.Payload.TargetSystem)) return [];
+        WarnIfTargetedAtUnregisteredComponent(context, packet.Payload.TargetSystem, packet.Payload.TargetComponent);
+        return components
+            .GetMessageRecipients(context.MessageId, packet.Payload.TargetSystem, packet.Payload.TargetComponent)
             .SelectMany(x => x.HandleMessage(context))
             .ToList();
     }

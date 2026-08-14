@@ -14,10 +14,12 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     private const uint GimbalDeviceInformationMessageId = 283;
     private const uint GimbalDeviceSetAttitudeMessageId = 284;
     private const uint GimbalDeviceAttitudeStatusMessageId = 285;
+    private const uint AutopilotStateForGimbalDeviceMessageId = 286;
     private const byte GimbalDeviceComponentId = 154;
 
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } =
-        [CommandLongMessageId, GimbalManagerSetAttitudeMessageId, GimbalDeviceSetAttitudeMessageId];
+        [CommandLongMessageId, GimbalManagerSetAttitudeMessageId, GimbalDeviceSetAttitudeMessageId,
+            AutopilotStateForGimbalDeviceMessageId];
 
     public override IEnumerable<OutgoingMessage> HandleMessage(
         MavlinkMessageContext context)
@@ -27,6 +29,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             CommandLongMessageId => HandleCommandLong(context),
             GimbalManagerSetAttitudeMessageId => HandleManagerSetAttitude(context),
             GimbalDeviceSetAttitudeMessageId => HandleDeviceSetAttitude(context),
+            AutopilotStateForGimbalDeviceMessageId => HandleAutopilotState(context),
             _ => []
         };
     }
@@ -174,6 +177,37 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         return [];
     }
 
+    private IEnumerable<OutgoingMessage> HandleAutopilotState(MavlinkMessageContext context)
+    {
+        AutopilotStateForGimbalDevicePacket packet;
+        try
+        {
+            packet = new AutopilotStateForGimbalDevicePacket();
+            var readSpan = context.Frame.Span;
+            packet.Deserialize(ref readSpan);
+        }
+        catch (Exception exception)
+        {
+            context.Log.Write($"AUTOPILOT_STATE_FOR_GIMBAL_DEVICE decode failed: {exception}");
+            return [];
+        }
+
+        if (packet.Payload.TargetSystem != SystemId || packet.Payload.TargetComponent != ComponentId)
+        {
+            return [];
+        }
+
+        gimbal.SetAutopilotState(new GimbalAutopilotState(
+            packet.Payload.TimeBootUs,
+            new GimbalQuaternion(packet.Payload.Q[0], packet.Payload.Q[1], packet.Payload.Q[2], packet.Payload.Q[3]),
+            packet.Payload.AngularVelocityZ,
+            packet.Payload.FeedForwardAngularVelocityZ));
+        context.Log.Write(
+            $"AUTOPILOT_STATE_FOR_GIMBAL_DEVICE received from {context.Source.SystemId}/{context.Source.ComponentId} " +
+            $"for {packet.Payload.TargetSystem}/{packet.Payload.TargetComponent}");
+        return [];
+    }
+
     public override IEnumerable<OutgoingMessage> GetPeriodicMessages(
         DateTimeOffset now) =>
         [
@@ -306,6 +340,8 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         var yawInEarthFrame = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame);
         var yawLock = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawLock);
         var supportedFlags =
+            GimbalDeviceFlags.GimbalDeviceFlagsRollLock |
+            GimbalDeviceFlags.GimbalDeviceFlagsPitchLock |
             GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame |
             GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame |
             GimbalDeviceFlags.GimbalDeviceFlagsYawLock;
@@ -339,13 +375,42 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         var message =
             $"GIMBAL_DEVICE_SET_ATTITUDE from {context.Source.SystemId}/{context.Source.ComponentId}\n" +
             $"  Target: {command.Payload.TargetSystem}/{command.Payload.TargetComponent}\n" +
-            $"  Flags: {command.Payload.Flags}\n" +
+            $"  Flags: {DescribeDeviceFlags(command.Payload.Flags)}\n" +
+            $"  Mode: {(rateOnly ? "rate" : "attitude")}\n" +
             $"  Quaternion: [{command.Payload.Q[0]}, {command.Payload.Q[1]}, {command.Payload.Q[2]}, {command.Payload.Q[3]}]" +
             (rateOnly ? " (rate-only)" : string.Empty) + "\n" +
-            $"  Angular velocity: [{command.Payload.AngularVelocityX}, {command.Payload.AngularVelocityY}, {command.Payload.AngularVelocityZ}]";
+            $"  Angular velocity: [{command.Payload.AngularVelocityX}, {command.Payload.AngularVelocityY}, {command.Payload.AngularVelocityZ}]" +
+            GetEulerDescription(command, rateOnly);
         Console.WriteLine(message);
         context.Log.Write(message.Replace(Environment.NewLine, " | "));
     }
+
+    private static string GetEulerDescription(GimbalDeviceSetAttitudePacket command, bool rateOnly)
+    {
+        if (rateOnly)
+        {
+            return string.Empty;
+        }
+
+        var quaternion = new GimbalQuaternion(
+            command.Payload.Q[0], command.Payload.Q[1], command.Payload.Q[2], command.Payload.Q[3]);
+        return !quaternion.TryToEuler(out var roll, out var pitch, out var yaw)
+            ? string.Empty
+            : $"\n  Euler: roll={RadiansToDegrees(roll):F1}, pitch={RadiansToDegrees(pitch):F1}, yaw={RadiansToDegrees(yaw):F1} deg";
+    }
+
+    private static string DescribeDeviceFlags(GimbalDeviceFlags flags)
+    {
+        var names = new List<string>();
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsRollLock)) names.Add("RollLock");
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsPitchLock)) names.Add("PitchLock");
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawLock)) names.Add("YawLock");
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame)) names.Add("YawInVehicleFrame");
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame)) names.Add("YawInEarthFrame");
+        return names.Count == 0 ? "None" : string.Join("|", names);
+    }
+
+    private static float RadiansToDegrees(float radians) => radians * 180f / MathF.PI;
 
     private static uint BootTimeMilliseconds() =>
         unchecked((uint)Environment.TickCount64);

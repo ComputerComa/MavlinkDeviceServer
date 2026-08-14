@@ -7,5 +7,6 @@ public interface IGimbalDevice
     bool SetAttitude(GimbalQuaternion attitude, float rollRate, float pitchRate, float yawRate);
     void SetRates(float rollRate, float pitchRate, float yawRate);
     void SetYawFrame(GimbalYawFrame yawFrame);
+    void SetAutopilotState(GimbalAutopilotState autopilotState);
     void Center();
 }
