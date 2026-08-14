@@ -9,7 +9,7 @@ using MavlinkDeviceServer.Mavlink;
 internal static class Program
 {
     private const byte DeviceSystemId = 1;
-    private const int ListenPort = 14550;
+    private const int ListenPort = 14551;
 
     private static async Task Main()
     {
