@@ -9,19 +9,16 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     : MavlinkComponentBase(systemId, componentId)
 {
     private const uint CommandLongMessageId = 76;
-    private const uint GimbalManagerInformationMessageId = 280;
-    private const uint GimbalManagerSetAttitudeMessageId = 282;
     private const uint GimbalDeviceInformationMessageId = 283;
     private const uint GimbalDeviceSetAttitudeMessageId = 284;
     private const uint GimbalDeviceAttitudeStatusMessageId = 285;
     private const uint AutopilotStateForGimbalDeviceMessageId = 286;
-    private const byte GimbalDeviceComponentId = 154;
 
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } =
-        [CommandLongMessageId, GimbalManagerSetAttitudeMessageId, GimbalDeviceSetAttitudeMessageId,
+        [CommandLongMessageId, GimbalDeviceSetAttitudeMessageId,
             AutopilotStateForGimbalDeviceMessageId];
     public override IReadOnlyCollection<uint> HandledRequestMessageIds { get; } =
-        [GimbalManagerInformationMessageId, GimbalDeviceInformationMessageId,
+        [GimbalDeviceInformationMessageId,
             GimbalDeviceAttitudeStatusMessageId];
 
     public override IEnumerable<OutgoingMessage> HandleMessage(
@@ -30,7 +27,6 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         return context.MessageId switch
         {
             CommandLongMessageId => HandleCommandLong(context),
-            GimbalManagerSetAttitudeMessageId => HandleManagerSetAttitude(context),
             GimbalDeviceSetAttitudeMessageId => HandleDeviceSetAttitude(context),
             AutopilotStateForGimbalDeviceMessageId => HandleAutopilotState(context),
             _ => []
@@ -66,11 +62,6 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         var requestedMessageId = (uint)Math.Max(0, command.Payload.Param1);
         return requestedMessageId switch
         {
-            GimbalManagerInformationMessageId =>
-            [
-                new(CreateManagerInformation(), "GIMBAL_MANAGER_INFORMATION requested response"),
-                Accepted(command)
-            ],
             GimbalDeviceInformationMessageId =>
             [
                 new(CreateDeviceInformation(), "GIMBAL_DEVICE_INFORMATION requested response"),
@@ -83,43 +74,6 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             ],
             _ => [Unsupported(command)]
         };
-    }
-
-    private IEnumerable<OutgoingMessage> HandleManagerSetAttitude(
-        MavlinkMessageContext context)
-    {
-        GimbalManagerSetAttitudePacket command;
-        try
-        {
-            command = new GimbalManagerSetAttitudePacket();
-            var readSpan = context.Frame.Span;
-            command.Deserialize(ref readSpan);
-        }
-        catch (Exception exception)
-        {
-            context.Log.Write($"GIMBAL_MANAGER_SET_ATTITUDE decode failed: {exception}");
-            return [];
-        }
-
-        if (command.Payload.GimbalDeviceId is not 0 and not GimbalDeviceComponentId)
-        {
-            return [];
-        }
-
-        var attitude = new GimbalQuaternion(
-            command.Payload.Q[0], command.Payload.Q[1],
-            command.Payload.Q[2], command.Payload.Q[3]);
-
-        if (!gimbal.SetAttitude(
-                attitude,
-                command.Payload.AngularVelocityX,
-                command.Payload.AngularVelocityY,
-                command.Payload.AngularVelocityZ))
-        {
-            context.Log.Write("GIMBAL_MANAGER_SET_ATTITUDE ignored invalid quaternion");
-        }
-
-        return [];
     }
 
     private IEnumerable<OutgoingMessage> HandleDeviceSetAttitude(
@@ -229,7 +183,6 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         DateTimeOffset now) =>
         [
             new(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}"),
-            new(CreateManagerStatus(), "GIMBAL_MANAGER_STATUS"),
             new(CreateAttitudeStatus(), "GIMBAL_DEVICE_ATTITUDE_STATUS")
         ];
 
@@ -263,30 +216,6 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         CreateFixedName("Fake MAVLink Gimbal").CopyTo(packet.Payload.CustomName, 0);
         // This MAVLink device is managed by the separate ArduPilot component.
         packet.Payload.GimbalDeviceId = 0;
-        return packet;
-    }
-
-    private GimbalManagerInformationPacket CreateManagerInformation()
-    {
-        var packet = new GimbalManagerInformationPacket
-        {
-            SystemId = SystemId,
-            ComponentId = ComponentId,
-            Sequence = NextSequence()
-        };
-
-        packet.Payload.TimeBootMs = BootTimeMilliseconds();
-        packet.Payload.CapFlags =
-            GimbalManagerCapFlags.GimbalManagerCapFlagsHasRollAxis |
-            GimbalManagerCapFlags.GimbalManagerCapFlagsHasPitchAxis |
-            GimbalManagerCapFlags.GimbalManagerCapFlagsHasYawAxis;
-        packet.Payload.GimbalDeviceId = GimbalDeviceComponentId;
-        packet.Payload.RollMin = gimbal.Limits.RollMinRadians;
-        packet.Payload.RollMax = gimbal.Limits.RollMaxRadians;
-        packet.Payload.PitchMin = gimbal.Limits.PitchMinRadians;
-        packet.Payload.PitchMax = gimbal.Limits.PitchMaxRadians;
-        packet.Payload.YawMin = gimbal.Limits.YawMinRadians;
-        packet.Payload.YawMax = gimbal.Limits.YawMaxRadians;
         return packet;
     }
 
@@ -339,20 +268,6 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         packet.Payload.Autopilot = MavAutopilot.MavAutopilotInvalid;
         packet.Payload.SystemStatus = MavState.MavStateActive;
         packet.Payload.MavlinkVersion = 3;
-        return packet;
-    }
-
-    private GimbalManagerStatusPacket CreateManagerStatus()
-    {
-        var packet = new GimbalManagerStatusPacket
-        {
-            SystemId = SystemId,
-            ComponentId = ComponentId,
-            Sequence = NextSequence()
-        };
-
-        packet.Payload.TimeBootMs = BootTimeMilliseconds();
-        packet.Payload.GimbalDeviceId = GimbalDeviceComponentId;
         return packet;
     }
 

@@ -33,3 +33,8 @@ dotnet run --project tools/MavlinkInjector -- `
 
 Defaults are router injector `127.0.0.1:14552`, source `255/190`, and target
 `1/154`.
+
+`gimbal-device-set-attitude` is the direct isolated test of the device server
+at `1/154`. `gimbal-set-attitude` and `gimbal-center` send the manager-level
+message 282; use `--target-component 1` when testing the ArduPilot manager.
+The device server intentionally does not consume message 282.

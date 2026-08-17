@@ -7,7 +7,6 @@ namespace MavlinkInjector.Commands;
 
 public static class InjectorCommands
 {
-    private const uint GimbalManagerInformationMessageId = 280;
     private const uint GimbalDeviceInformationMessageId = 283;
     private const byte GimbalDeviceComponentId = 154;
 
@@ -17,13 +16,6 @@ public static class InjectorCommands
             GimbalDeviceInformationMessageId,
             "GIMBAL_DEVICE_INFORMATION (283)",
             "gimbal-info");
-
-    public static async Task<int> RunGimbalManagerInfoAsync(GimbalManagerInfoOptions options)
-        => await SendMessageRequestAsync(
-            options,
-            GimbalManagerInformationMessageId,
-            "GIMBAL_MANAGER_INFORMATION (280)",
-            "gimbal-manager-info");
 
     private static async Task<int> SendMessageRequestAsync(
         CommonInjectorOptions options,

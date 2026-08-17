@@ -20,8 +20,10 @@ registered or advertised by default.
 
 For normal control, ArduPilot is the Gimbal Manager and sends
 `GIMBAL_DEVICE_SET_ATTITUDE` to the gimbal component. The gimbal reports
-`GIMBAL_DEVICE_INFORMATION` and `GIMBAL_DEVICE_ATTITUDE_STATUS`. Direct
-`GIMBAL_MANAGER_SET_ATTITUDE` support is retained for controlled injector tests.
+`GIMBAL_DEVICE_INFORMATION` and `GIMBAL_DEVICE_ATTITUDE_STATUS`.
+Component `1/154` does not implement Gimbal Manager messages. The injector can
+still send `GIMBAL_MANAGER_SET_ATTITUDE` to an external manager such as
+ArduPilot for manager-path testing.
 
 ## Quick start
 

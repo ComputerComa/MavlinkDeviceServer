@@ -4,7 +4,7 @@ Generated from the CommandLineParser option classes. Do not edit manually.
 
 ## `gimbal-center`
 
-Center the fake gimbal.
+Send a zero-attitude GIMBAL_MANAGER_SET_ATTITUDE command to an external gimbal manager.
 
 ```text
 mavlink-injector gimbal-center [options]
@@ -61,26 +61,9 @@ mavlink-injector gimbal-info [options]
 | `--target-system` | no | configuration or built-in | Target MAVLink system ID. |
 | `--target-component` | no | configuration or built-in | Target MAVLink component ID. |
 
-## `gimbal-manager-info`
-
-Request GIMBAL_MANAGER_INFORMATION from the gimbal.
-
-```text
-mavlink-injector gimbal-manager-info [options]
-```
-
-| Option | Required | Default | Description |
-| --- | --- | --- | --- |
-| `--host` | no | configuration or built-in | Destination IP address. |
-| `--port` | no | configuration or built-in | Destination UDP port. |
-| `--source-system` | no | configuration or built-in | Source MAVLink system ID. |
-| `--source-component` | no | configuration or built-in | Source MAVLink component ID. |
-| `--target-system` | no | configuration or built-in | Target MAVLink system ID. |
-| `--target-component` | no | configuration or built-in | Target MAVLink component ID. |
-
 ## `gimbal-set-attitude`
 
-Set the fake gimbal attitude in degrees.
+Send GIMBAL_MANAGER_SET_ATTITUDE to an external gimbal manager.
 
 ```text
 mavlink-injector gimbal-set-attitude [options]

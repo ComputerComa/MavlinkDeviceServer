@@ -2,7 +2,7 @@ using CommandLine;
 
 namespace MavlinkInjector.Commands;
 
-[Verb("gimbal-set-attitude", HelpText = "Set the fake gimbal attitude in degrees.")]
+[Verb("gimbal-set-attitude", HelpText = "Send GIMBAL_MANAGER_SET_ATTITUDE to an external gimbal manager.")]
 public sealed class GimbalSetAttitudeOptions : CommonInjectorOptions
 {
     [Option("pitch", Required = true, HelpText = "Requested pitch in degrees.")]

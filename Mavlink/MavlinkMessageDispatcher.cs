@@ -5,7 +5,7 @@ namespace MavlinkDeviceServer.Mavlink;
 
 public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegistry components, DebugLog log)
 {
-    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 282 => ProcessGimbalManagerSetAttitude(context), 284 => ProcessGimbalDeviceSetAttitude(context), 286 => ProcessAutopilotStateForGimbalDevice(context), _ => [] };
+    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 77 => ProcessCommandAck(context), 284 => ProcessGimbalDeviceSetAttitude(context), 286 => ProcessAutopilotStateForGimbalDevice(context), _ => [] };
     public IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => components.Components.SelectMany(x => x.GetPeriodicMessages(now));
     private IEnumerable<OutgoingMessage> ProcessHeartbeat(MavlinkMessageContext context)
     {
@@ -39,18 +39,30 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
             command.Payload.TargetComponent).SingleOrDefault();
         return target is null ? [] : target.HandleMessage(context).ToList();
     }
-    private IEnumerable<OutgoingMessage> ProcessGimbalManagerSetAttitude(MavlinkMessageContext context)
+    private IEnumerable<OutgoingMessage> ProcessCommandAck(MavlinkMessageContext context)
     {
-        GimbalManagerSetAttitudePacket command;
-        try { command = new(); var readSpan = context.Frame.Span; command.Deserialize(ref readSpan); }
-        catch (Exception exception) { log.Write($"GIMBAL_MANAGER_SET_ATTITUDE decode failed: {exception}"); return []; }
+        if (context.Frame.Span[0] != 0xFD) return [];
 
-        if (!TargetsThisSystem(command.Payload.TargetSystem)) return [];
-        WarnIfTargetedAtUnregisteredComponent(context, command.Payload.TargetSystem, command.Payload.TargetComponent);
-        return components
-            .GetMessageRecipients(context.MessageId, command.Payload.TargetSystem, command.Payload.TargetComponent)
-            .SelectMany(x => x.HandleMessage(context))
-            .ToList();
+        try
+        {
+            var packet = new CommandAckPacket();
+            var readSpan = context.Frame.Span;
+            packet.Deserialize(ref readSpan);
+            var target = packet.Payload.TargetSystem == 0 && packet.Payload.TargetComponent == 0
+                ? string.Empty
+                : $" Target={packet.Payload.TargetSystem}/{packet.Payload.TargetComponent}";
+            var message =
+                $"COMMAND_ACK from {packet.SystemId}/{packet.ComponentId} " +
+                $"Command={packet.Payload.Command} Result={packet.Payload.Result}{target}";
+            Console.WriteLine(message);
+            log.Write(message);
+        }
+        catch (Exception exception)
+        {
+            log.Write($"COMMAND_ACK decode failed: {exception}");
+        }
+
+        return [];
     }
     private IEnumerable<OutgoingMessage> ProcessGimbalDeviceSetAttitude(MavlinkMessageContext context)
     {
