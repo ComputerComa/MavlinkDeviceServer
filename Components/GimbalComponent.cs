@@ -5,14 +5,25 @@ using MavlinkDeviceServer.Mavlink;
 
 namespace MavlinkDeviceServer.Components;
 
-public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevice gimbal)
+public sealed class GimbalComponent(
+    byte systemId,
+    byte componentId,
+    IGimbalDevice gimbal,
+    MavlinkMessageRateController rateController)
     : MavlinkComponentBase(systemId, componentId)
 {
     private const uint CommandLongMessageId = 76;
+    private const uint HeartbeatMessageId = 0;
+    private const uint SetMessageIntervalCommand = 511;
     private const uint GimbalDeviceInformationMessageId = 283;
     private const uint GimbalDeviceSetAttitudeMessageId = 284;
     private const uint GimbalDeviceAttitudeStatusMessageId = 285;
     private const uint AutopilotStateForGimbalDeviceMessageId = 286;
+    private const long MinimumAttitudeStatusIntervalMicroseconds = 10_000;
+    private const long MaximumAttitudeStatusIntervalMicroseconds = 60_000_000;
+    private int _firstDeviceInformationRequestReceived;
+    private int _firstDeviceSetAttitudeReceived;
+    private int _firstAutopilotStateReceived;
 
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } =
         [CommandLongMessageId, GimbalDeviceSetAttitudeMessageId,
@@ -54,19 +65,44 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             return [];
         }
 
-        if (command.Payload.Command != MavCmd.MavCmdRequestMessage)
+        if (command.Payload.Command == MavCmd.MavCmdRequestMessage)
         {
-            return [Unsupported(command)];
+            return HandleRequestMessage(command, context.Log);
         }
 
+        if ((int)command.Payload.Command == SetMessageIntervalCommand)
+        {
+            return HandleSetMessageInterval(command, context.Log);
+        }
+
+        return [Unsupported(command)];
+    }
+
+    private IEnumerable<OutgoingMessage> HandleRequestMessage(CommandLongPacket command, Logging.DebugLog log)
+    {
         var requestedMessageId = (uint)Math.Max(0, command.Payload.Param1);
+        if (requestedMessageId == GimbalDeviceInformationMessageId)
+        {
+            const string message = "MAV_CMD_REQUEST_MESSAGE received for GIMBAL_DEVICE_INFORMATION (283).";
+            log.Write($"{message} Source={command.SystemId}/{command.ComponentId}");
+            var firstRequest = Interlocked.Exchange(ref _firstDeviceInformationRequestReceived, 1) == 0;
+            if (firstRequest)
+            {
+                Console.WriteLine(message);
+            }
+
+            return
+            [
+                new(
+                    CreateDeviceInformation(),
+                    "GIMBAL_DEVICE_INFORMATION requested response",
+                    firstRequest ? "GIMBAL_DEVICE_INFORMATION sent from 1/154." : null),
+                Accepted(command)
+            ];
+        }
+
         return requestedMessageId switch
         {
-            GimbalDeviceInformationMessageId =>
-            [
-                new(CreateDeviceInformation(), "GIMBAL_DEVICE_INFORMATION requested response"),
-                Accepted(command)
-            ],
             GimbalDeviceAttitudeStatusMessageId =>
             [
                 new(CreateAttitudeStatus(), "GIMBAL_DEVICE_ATTITUDE_STATUS requested response"),
@@ -74,6 +110,86 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             ],
             _ => [Unsupported(command)]
         };
+    }
+
+    private IEnumerable<OutgoingMessage> HandleSetMessageInterval(
+        CommandLongPacket command,
+        Logging.DebugLog log)
+    {
+        if (!TryGetMessageId(command.Payload.Param1, out var messageId))
+        {
+            return [Failed(command)];
+        }
+
+        if (messageId != GimbalDeviceAttitudeStatusMessageId)
+        {
+            return [Unsupported(command)];
+        }
+
+        var requestedIntervalMicroseconds = command.Payload.Param2;
+        if (!float.IsFinite(requestedIntervalMicroseconds))
+        {
+            return [Failed(command)];
+        }
+
+        var scheduleKey = new MavlinkMessageScheduleKey(
+            SystemId,
+            ComponentId,
+            GimbalDeviceAttitudeStatusMessageId);
+
+        string changeDescription;
+        if (requestedIntervalMicroseconds < 0)
+        {
+            if (!rateController.TryDisable(scheduleKey))
+            {
+                return [Failed(command)];
+            }
+
+            changeDescription = "GIMBAL_DEVICE_ATTITUDE_STATUS stream disabled.";
+        }
+        else if (requestedIntervalMicroseconds == 0)
+        {
+            if (!rateController.TryRestoreDefault(scheduleKey, out var defaultInterval))
+            {
+                return [Failed(command)];
+            }
+
+            changeDescription =
+                $"GIMBAL_DEVICE_ATTITUDE_STATUS interval restored to {ToMicroseconds(defaultInterval)} us.";
+        }
+        else if (requestedIntervalMicroseconds < MinimumAttitudeStatusIntervalMicroseconds ||
+                 requestedIntervalMicroseconds > MaximumAttitudeStatusIntervalMicroseconds)
+        {
+            return [Failed(command)];
+        }
+        else
+        {
+            var interval = TimeSpan.FromTicks((long)requestedIntervalMicroseconds * 10L);
+            if (!rateController.TrySetInterval(scheduleKey, interval, out var effectiveInterval))
+            {
+                return [Failed(command)];
+            }
+
+            changeDescription =
+                $"GIMBAL_DEVICE_ATTITUDE_STATUS interval set to {ToMicroseconds(effectiveInterval)} us.";
+        }
+
+        Console.WriteLine(changeDescription);
+        log.Write(changeDescription);
+        return [Accepted(command)];
+    }
+
+    private static bool TryGetMessageId(float value, out uint messageId)
+    {
+        if (!float.IsFinite(value) || value < 0 || value > uint.MaxValue ||
+            value != MathF.Truncate(value))
+        {
+            messageId = 0;
+            return false;
+        }
+
+        messageId = (uint)value;
+        return true;
     }
 
     private IEnumerable<OutgoingMessage> HandleDeviceSetAttitude(
@@ -173,17 +289,28 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             new GimbalQuaternion(packet.Payload.Q[0], packet.Payload.Q[1], packet.Payload.Q[2], packet.Payload.Q[3]),
             packet.Payload.AngularVelocityZ,
             packet.Payload.FeedForwardAngularVelocityZ));
-        context.Log.Write(
+        var message =
             $"AUTOPILOT_STATE_FOR_GIMBAL_DEVICE received from {context.Source.SystemId}/{context.Source.ComponentId} " +
-            $"for {packet.Payload.TargetSystem}/{packet.Payload.TargetComponent}");
+            $"for {packet.Payload.TargetSystem}/{packet.Payload.TargetComponent}";
+        context.Log.Write(message);
+        if (Interlocked.Exchange(ref _firstAutopilotStateReceived, 1) == 0)
+        {
+            Console.WriteLine($"First {message}.");
+        }
         return [];
     }
 
-    public override IEnumerable<OutgoingMessage> GetPeriodicMessages(
-        DateTimeOffset now) =>
+    public override IEnumerable<ScheduledMessage> GetScheduledMessages() =>
         [
-            new(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}"),
-            new(CreateAttitudeStatus(), "GIMBAL_DEVICE_ATTITUDE_STATUS")
+            new(
+                new MavlinkMessageScheduleKey(SystemId, ComponentId, HeartbeatMessageId),
+                TimeSpan.FromSeconds(1),
+                () => new OutgoingMessage(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}"),
+                $"Gimbal heartbeat transmission started for {SystemId}/{ComponentId}."),
+            new(
+                new MavlinkMessageScheduleKey(SystemId, ComponentId, GimbalDeviceAttitudeStatusMessageId),
+                TimeSpan.FromMilliseconds(100),
+                () => new OutgoingMessage(CreateAttitudeStatus(), "GIMBAL_DEVICE_ATTITUDE_STATUS"))
         ];
 
     private GimbalDeviceInformationPacket CreateDeviceInformation()
@@ -319,7 +446,7 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         return true;
     }
 
-    private static void LogDeviceSetAttitude(
+    private void LogDeviceSetAttitude(
         MavlinkMessageContext context,
         GimbalDeviceSetAttitudePacket command,
         bool rateOnly,
@@ -334,8 +461,11 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             (rateOnly ? " (rate-only)" : string.Empty) + "\n" +
             $"  Angular velocity: [{command.Payload.AngularVelocityX}, {command.Payload.AngularVelocityY}, {command.Payload.AngularVelocityZ}]" +
             GetEulerDescription(command, rateOnly || mode is not null);
-        Console.WriteLine(message);
         context.Log.Write(message.Replace(Environment.NewLine, " | "));
+        if (Interlocked.Exchange(ref _firstDeviceSetAttitudeReceived, 1) == 0)
+        {
+            Console.WriteLine($"First {message}");
+        }
     }
 
     private static string GetEulerDescription(GimbalDeviceSetAttitudePacket command, bool rateOnly)
@@ -367,6 +497,8 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
 
     private static float RadiansToDegrees(float radians) => radians * 180f / MathF.PI;
 
+    private static long ToMicroseconds(TimeSpan interval) => interval.Ticks / 10L;
+
     private static uint BootTimeMilliseconds() =>
         unchecked((uint)Environment.TickCount64);
 
@@ -390,6 +522,10 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     private OutgoingMessage Unsupported(CommandLongPacket command) =>
         new(CreateCommandAck(command, MavResult.MavResultUnsupported),
             $"COMMAND_ACK {command.Payload.Command} {MavResult.MavResultUnsupported}");
+
+    private OutgoingMessage Failed(CommandLongPacket command) =>
+        new(CreateCommandAck(command, MavResult.MavResultFailed),
+            $"COMMAND_ACK {command.Payload.Command} {MavResult.MavResultFailed}");
 
     private CommandAckPacket CreateCommandAck(
         CommandLongPacket command,

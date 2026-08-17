@@ -31,6 +31,15 @@ dotnet run --project tools/MavlinkInjector -- `
   --yaw-lock
 ```
 
+Set the direct device-status stream to 5 Hz, restore its default 10 Hz rate,
+or disable it:
+
+```powershell
+dotnet run --project tools/MavlinkInjector -- gimbal-attitude-status-rate --interval-us 200000
+dotnet run --project tools/MavlinkInjector -- gimbal-attitude-status-rate --interval-us 0
+dotnet run --project tools/MavlinkInjector -- gimbal-attitude-status-rate --interval-us -1
+```
+
 Defaults are router injector `127.0.0.1:14552`, source `255/190`, and target
 `1/154`.
 

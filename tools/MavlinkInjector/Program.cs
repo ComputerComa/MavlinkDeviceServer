@@ -14,10 +14,11 @@ catch (Exception exception) { Console.Error.WriteLine(exception.Message); return
 var suppliedOptions = InjectorDefaults.GetSuppliedCommonOptions(args);
 
 return await Parser.Default
-    .ParseArguments<GimbalInfoOptions, GimbalSetAttitudeOptions, GimbalDeviceSetAttitudeOptions, GimbalCenterOptions>(args)
-    .MapResult<GimbalInfoOptions, GimbalSetAttitudeOptions, GimbalDeviceSetAttitudeOptions, GimbalCenterOptions, Task<int>>(
+    .ParseArguments<GimbalInfoOptions, GimbalSetAttitudeOptions, GimbalDeviceSetAttitudeOptions, GimbalAttitudeStatusRateOptions, GimbalCenterOptions>(args)
+    .MapResult<GimbalInfoOptions, GimbalSetAttitudeOptions, GimbalDeviceSetAttitudeOptions, GimbalAttitudeStatusRateOptions, GimbalCenterOptions, Task<int>>(
         options => InjectorCommands.RunGimbalInfoAsync((GimbalInfoOptions)options.ApplyConfiguredDefaults(defaults, suppliedOptions)),
         options => InjectorCommands.RunGimbalSetAttitudeAsync((GimbalSetAttitudeOptions)options.ApplyConfiguredDefaults(defaults, suppliedOptions)),
         options => InjectorCommands.RunGimbalDeviceSetAttitudeAsync((GimbalDeviceSetAttitudeOptions)options.ApplyConfiguredDefaults(defaults, suppliedOptions)),
+        options => InjectorCommands.RunGimbalAttitudeStatusRateAsync((GimbalAttitudeStatusRateOptions)options.ApplyConfiguredDefaults(defaults, suppliedOptions)),
         options => InjectorCommands.RunGimbalCenterAsync((GimbalCenterOptions)options.ApplyConfiguredDefaults(defaults, suppliedOptions)),
         errors => Task.FromResult(errors.Any(error => error is HelpRequestedError or VersionRequestedError) ? 0 : 2));

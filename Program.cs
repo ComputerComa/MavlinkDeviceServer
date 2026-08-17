@@ -29,14 +29,15 @@ internal static class Program
         };
 
         var components = new ComponentRegistry();
+        var rateController = new MavlinkMessageRateController();
         const byte gimbalDeviceComponentId = 154;
         var gimbal = new FakeGimbalDevice();
 
         components.Register(new OnboardComputerComponent(DeviceSystemId, (byte)MavComponent.MavCompIdOnboardComputer));
-        components.Register(new GimbalComponent(DeviceSystemId, gimbalDeviceComponentId, gimbal));
+        components.Register(new GimbalComponent(DeviceSystemId, gimbalDeviceComponentId, gimbal, rateController));
 
         var dispatcher = new MavlinkMessageDispatcher(DeviceSystemId, components, debugLog);
-        var server = new MavlinkServer(listenEndpoint, dispatcher, debugLog);
+        var server = new MavlinkServer(listenEndpoint, dispatcher, rateController, debugLog);
 
         Console.WriteLine("MAVLink Device Server — SITL test");
         Console.WriteLine($"Listening: {listenEndpoint}");

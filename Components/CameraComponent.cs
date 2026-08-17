@@ -6,10 +6,17 @@ namespace MavlinkDeviceServer.Components;
 // CAMERA_INFORMATION, CAMERA_SETTINGS, and CAMERA_CAPTURE_STATUS from an adapter.
 public sealed class CameraComponent(byte systemId, byte componentId) : MavlinkComponentBase(systemId, componentId)
 {
+    private const uint HeartbeatMessageId = 0;
+
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } = [];
 
-    public override IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) =>
-        [new(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}")];
+    public override IEnumerable<ScheduledMessage> GetScheduledMessages() =>
+    [
+        new(
+            new MavlinkMessageScheduleKey(SystemId, ComponentId, HeartbeatMessageId),
+            TimeSpan.FromSeconds(1),
+            () => new OutgoingMessage(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}"))
+    ];
 
     private HeartbeatPacket CreateHeartbeat()
     {

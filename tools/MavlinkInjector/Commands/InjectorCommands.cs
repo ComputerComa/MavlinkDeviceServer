@@ -8,6 +8,8 @@ namespace MavlinkInjector.Commands;
 public static class InjectorCommands
 {
     private const uint GimbalDeviceInformationMessageId = 283;
+    private const uint GimbalDeviceAttitudeStatusMessageId = 285;
+    private const int SetMessageIntervalCommand = 511;
     private const byte GimbalDeviceComponentId = 154;
 
     public static async Task<int> RunGimbalInfoAsync(GimbalInfoOptions options)
@@ -55,6 +57,29 @@ public static class InjectorCommands
             : options.EarthFrame && options.VehicleFrame
                 ? Task.FromResult(InvalidDeviceFrame())
             : SendGimbalDeviceAttitudeAsync(options, options.Roll, options.Pitch, options.Yaw);
+
+    public static Task<int> RunGimbalAttitudeStatusRateAsync(GimbalAttitudeStatusRateOptions options)
+    {
+        var packet = new CommandLongPacket
+        {
+            SystemId = options.SourceSystem,
+            ComponentId = options.SourceComponent,
+            Sequence = 0
+        };
+
+        packet.Payload.TargetSystem = options.TargetSystem;
+        packet.Payload.TargetComponent = options.TargetComponent;
+        packet.Payload.Command = (MavCmd)SetMessageIntervalCommand;
+        packet.Payload.Param1 = GimbalDeviceAttitudeStatusMessageId;
+        packet.Payload.Param2 = options.IntervalMicroseconds;
+
+        return SendAsync(
+            packet,
+            options,
+            VerifyGimbalAttitudeStatusRate,
+            "MAV_CMD_SET_MESSAGE_INTERVAL",
+            $"GIMBAL_DEVICE_ATTITUDE_STATUS interval={options.IntervalMicroseconds} us");
+    }
 
     public static Task<int> RunGimbalCenterAsync(GimbalCenterOptions options) =>
         SendGimbalAttitudeAsync(options, 0f, 0f, 0f);
@@ -203,6 +228,21 @@ public static class InjectorCommands
             packet.Payload.Flags != expectedFlags)
         {
             throw new InvalidOperationException("Encoded GIMBAL_DEVICE_SET_ATTITUDE did not match the requested command.");
+        }
+    }
+
+    private static void VerifyGimbalAttitudeStatusRate(byte[] frame, CommonInjectorOptions options)
+    {
+        var packet = new CommandLongPacket();
+        ReadOnlySpan<byte> readSpan = frame;
+        packet.Deserialize(ref readSpan);
+
+        if (packet.SystemId != options.SourceSystem || packet.ComponentId != options.SourceComponent ||
+            packet.Payload.TargetSystem != options.TargetSystem || packet.Payload.TargetComponent != options.TargetComponent ||
+            (int)packet.Payload.Command != SetMessageIntervalCommand ||
+            packet.Payload.Param1 != GimbalDeviceAttitudeStatusMessageId)
+        {
+            throw new InvalidOperationException("Encoded MAV_CMD_SET_MESSAGE_INTERVAL did not match the requested command.");
         }
     }
 

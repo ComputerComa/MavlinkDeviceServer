@@ -5,7 +5,9 @@ namespace MavlinkDeviceServer.Components;
 
 public sealed class OnboardComputerComponent(byte systemId, byte componentId) : MavlinkComponentBase(systemId, componentId)
 {
-    private const uint CommandLongMessageId = 76, OnboardComputerStatusMessageId = 390; private int _statusCounter;
+    private const uint CommandLongMessageId = 76;
+    private const uint HeartbeatMessageId = 0;
+    private const uint OnboardComputerStatusMessageId = 390;
     public override IReadOnlyCollection<uint> HandledMessageIds { get; } = [CommandLongMessageId];
     public override IReadOnlyCollection<uint> HandledRequestMessageIds { get; } = [OnboardComputerStatusMessageId];
     public override IEnumerable<OutgoingMessage> HandleMessage(MavlinkMessageContext context)
@@ -16,11 +18,19 @@ public sealed class OnboardComputerComponent(byte systemId, byte componentId) : 
         Console.WriteLine("  Result: Unsupported command"); Console.WriteLine(); context.Log.Write($"COMMAND_LONG unsupported: {command.Payload.Command}");
         return [new(CreateCommandAck(command, MavResult.MavResultUnsupported), $"COMMAND_ACK {command.Payload.Command} {MavResult.MavResultUnsupported}")];
     }
-    public override IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now)
+    public override IEnumerable<ScheduledMessage> GetScheduledMessages()
     {
-        var messages = new List<OutgoingMessage> { new(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}") };
-        if (++_statusCounter >= 5) { _statusCounter = 0; messages.Add(new(CreateOnboardComputerStatus(), "ONBOARD_COMPUTER_STATUS")); }
-        return messages;
+        return
+        [
+            new(
+                new MavlinkMessageScheduleKey(SystemId, ComponentId, HeartbeatMessageId),
+                TimeSpan.FromSeconds(1),
+                () => new OutgoingMessage(CreateHeartbeat(), $"HEARTBEAT SYS={SystemId} COMP={ComponentId}")),
+            new(
+                new MavlinkMessageScheduleKey(SystemId, ComponentId, OnboardComputerStatusMessageId),
+                TimeSpan.FromSeconds(5),
+                () => new OutgoingMessage(CreateOnboardComputerStatus(), "ONBOARD_COMPUTER_STATUS"))
+        ];
     }
     private IEnumerable<OutgoingMessage> HandleRequestMessage(CommandLongPacket command, Logging.DebugLog log)
     {

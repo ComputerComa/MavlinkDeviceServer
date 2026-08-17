@@ -8,6 +8,6 @@ public abstract class MavlinkComponentBase(byte systemId, byte componentId) : IM
     public abstract IReadOnlyCollection<uint> HandledMessageIds { get; }
     public virtual IReadOnlyCollection<uint> HandledRequestMessageIds { get; } = [];
     public virtual IEnumerable<OutgoingMessage> HandleMessage(MavlinkMessageContext context) => [];
-    public virtual IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => [];
+    public virtual IEnumerable<ScheduledMessage> GetScheduledMessages() => [];
     protected byte NextSequence() => unchecked((byte)Interlocked.Increment(ref _packetSequence));
 }

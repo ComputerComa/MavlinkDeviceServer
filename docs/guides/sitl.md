@@ -8,6 +8,11 @@ parameter workflow and verify:
 MNT1_TYPE = 6
 ```
 
+Reboot SITL after setting `MNT1_TYPE`; the mount backend reads this setting
+during initialization. Then start mavlink-router and MavlinkDeviceServer so
+ArduPilot can discover the `1/154` gimbal heartbeat and request device
+information.
+
 ## Included ArduPlane launch example
 
 [launch-sitl.sh](https://github.com/ComputerComa/MavlinkDeviceServer/blob/master/launch-sitl.sh) is a concrete ArduPlane SITL launch
@@ -37,3 +42,10 @@ After SITL, mavlink-router, and MavlinkDeviceServer start, observe:
 
 Mission Planner Home/ROI/mount actions should make ArduPilot emit repeated
 `GIMBAL_DEVICE_SET_ATTITUDE` (284) packets to `1/154`.
+
+Use these Wireshark display filters while validating the device path:
+
+```text
+mavlink.msgid == 283
+mavlink.msgid == 284 || mavlink.msgid == 285 || mavlink.msgid == 286
+```

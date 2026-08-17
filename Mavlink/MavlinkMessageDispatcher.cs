@@ -5,8 +5,19 @@ namespace MavlinkDeviceServer.Mavlink;
 
 public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegistry components, DebugLog log)
 {
-    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) => context.MessageId switch { 0 => ProcessHeartbeat(context), 76 => ProcessCommandLong(context), 77 => ProcessCommandAck(context), 284 => ProcessGimbalDeviceSetAttitude(context), 286 => ProcessAutopilotStateForGimbalDevice(context), _ => [] };
-    public IEnumerable<OutgoingMessage> GetPeriodicMessages(DateTimeOffset now) => components.Components.SelectMany(x => x.GetPeriodicMessages(now));
+    public IEnumerable<OutgoingMessage> Route(MavlinkMessageContext context) =>
+        context.MessageId switch
+        {
+            0 => ProcessHeartbeat(context),
+            76 => ProcessCommandLong(context),
+            77 => ProcessCommandAck(context),
+            284 => ProcessGimbalDeviceSetAttitude(context),
+            286 => ProcessAutopilotStateForGimbalDevice(context),
+            _ => []
+        };
+
+    public IEnumerable<ScheduledMessage> GetScheduledMessages() =>
+        components.Components.SelectMany(component => component.GetScheduledMessages());
     private IEnumerable<OutgoingMessage> ProcessHeartbeat(MavlinkMessageContext context)
     {
         if (context.Frame.Span[0] != 0xFD) return [];
@@ -54,8 +65,11 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
             var message =
                 $"COMMAND_ACK from {packet.SystemId}/{packet.ComponentId} " +
                 $"Command={packet.Payload.Command} Result={packet.Payload.Result}{target}";
-            Console.WriteLine(message);
             log.Write(message);
+            if (ShouldWriteCommandAckToConsole(packet))
+            {
+                Console.WriteLine(message);
+            }
         }
         catch (Exception exception)
         {
@@ -64,6 +78,18 @@ public sealed class MavlinkMessageDispatcher(byte deviceSystemId, ComponentRegis
 
         return [];
     }
+
+    private static bool ShouldWriteCommandAckToConsole(CommandAckPacket packet)
+    {
+        if (packet.Payload.Result != MavResult.MavResultAccepted)
+        {
+            return true;
+        }
+
+        return (int)packet.Payload.Command is
+            205 or 220 or 511 or 1000 or 1001;
+    }
+
     private IEnumerable<OutgoingMessage> ProcessGimbalDeviceSetAttitude(MavlinkMessageContext context)
     {
         GimbalDeviceSetAttitudePacket command;

@@ -25,6 +25,20 @@ Component `1/154` does not implement Gimbal Manager messages. The injector can
 still send `GIMBAL_MANAGER_SET_ATTITUDE` to an external manager such as
 ArduPilot for manager-path testing.
 
+## Default telemetry rates
+
+| Message | Origin | Default rate |
+| --- | --- | --- |
+| `HEARTBEAT` | `1/191` onboard computer | 1 Hz |
+| `ONBOARD_COMPUTER_STATUS` (390) | `1/191` onboard computer | 0.2 Hz |
+| `HEARTBEAT` | `1/154` gimbal device | 1 Hz |
+| `GIMBAL_DEVICE_ATTITUDE_STATUS` (285) | `1/154` gimbal device | 10 Hz |
+
+The gimbal accepts `MAV_CMD_SET_MESSAGE_INTERVAL` (511) for message 285.
+Positive values set an interval in microseconds, `0` restores the 10 Hz
+default, and negative values stop the stream. Intervals below 10 ms (100 Hz)
+or above 60 seconds are rejected.
+
 ## Quick start
 
 Prerequisites: .NET SDK 10, ArduPilot SITL, and mavlink-router.
