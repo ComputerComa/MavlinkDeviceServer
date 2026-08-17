@@ -23,12 +23,20 @@ public sealed record GimbalState(
     float RollRateRadiansPerSecond,
     float PitchRateRadiansPerSecond,
     float YawRateRadiansPerSecond,
-    GimbalYawFrame YawFrame);
+    GimbalYawFrame YawFrame,
+    GimbalPosition Position);
 
 public enum GimbalYawFrame
 {
     Vehicle,
     Earth
+}
+
+public enum GimbalPosition
+{
+    Active,
+    Neutral,
+    Retracted
 }
 
 public sealed record GimbalAutopilotState(

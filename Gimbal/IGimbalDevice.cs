@@ -9,4 +9,6 @@ public interface IGimbalDevice
     void SetYawFrame(GimbalYawFrame yawFrame);
     void SetAutopilotState(GimbalAutopilotState autopilotState);
     void Center();
+    void Neutral();
+    void Retract();
 }

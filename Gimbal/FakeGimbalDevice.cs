@@ -3,7 +3,7 @@ namespace MavlinkDeviceServer.Gimbal;
 public sealed class FakeGimbalDevice : IGimbalDevice
 {
     private readonly object _sync = new();
-    private GimbalState _state = new(0, 0, 0, 0, 0, 0, GimbalYawFrame.Vehicle);
+    private GimbalState _state = new(0, 0, 0, 0, 0, 0, GimbalYawFrame.Vehicle, GimbalPosition.Active);
     private GimbalAutopilotState? _autopilotState;
 
     public GimbalLimits Limits => GimbalLimits.Fake;
@@ -31,7 +31,8 @@ public sealed class FakeGimbalDevice : IGimbalDevice
                 float.IsFinite(rollRate) ? rollRate : _state.RollRateRadiansPerSecond,
                 float.IsFinite(pitchRate) ? pitchRate : _state.PitchRateRadiansPerSecond,
                 float.IsFinite(yawRate) ? yawRate : _state.YawRateRadiansPerSecond,
-                _state.YawFrame);
+                _state.YawFrame,
+                GimbalPosition.Active);
         }
 
         return true;
@@ -45,7 +46,8 @@ public sealed class FakeGimbalDevice : IGimbalDevice
             {
                 RollRateRadiansPerSecond = float.IsFinite(rollRate) ? rollRate : _state.RollRateRadiansPerSecond,
                 PitchRateRadiansPerSecond = float.IsFinite(pitchRate) ? pitchRate : _state.PitchRateRadiansPerSecond,
-                YawRateRadiansPerSecond = float.IsFinite(yawRate) ? yawRate : _state.YawRateRadiansPerSecond
+                YawRateRadiansPerSecond = float.IsFinite(yawRate) ? yawRate : _state.YawRateRadiansPerSecond,
+                Position = GimbalPosition.Active
             };
         }
     }
@@ -70,7 +72,21 @@ public sealed class FakeGimbalDevice : IGimbalDevice
     {
         lock (_sync)
         {
-            _state = new GimbalState(0, 0, 0, 0, 0, 0, GimbalYawFrame.Vehicle);
+            _state = new GimbalState(0, 0, 0, 0, 0, 0, GimbalYawFrame.Vehicle, GimbalPosition.Active);
+        }
+    }
+
+    public void Neutral() => SetPosition(GimbalPosition.Neutral);
+
+    public void Retract() => SetPosition(GimbalPosition.Retracted);
+
+    private void SetPosition(GimbalPosition position)
+    {
+        lock (_sync)
+        {
+            // The fake device has no separate physical stow geometry yet.
+            // Both special positions are represented by a centered attitude.
+            _state = new GimbalState(0, 0, 0, 0, 0, 0, GimbalYawFrame.Vehicle, position);
         }
     }
 }

@@ -150,6 +150,20 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
             return [];
         }
 
+        if (command.Payload.Flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsRetract))
+        {
+            gimbal.Retract();
+            LogDeviceSetAttitude(context, command, rateOnly: false, mode: "retract");
+            return [];
+        }
+
+        if (command.Payload.Flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsNeutral))
+        {
+            gimbal.Neutral();
+            LogDeviceSetAttitude(context, command, rateOnly: false, mode: "neutral");
+            return [];
+        }
+
         var quaternion = new GimbalQuaternion(
             command.Payload.Q[0], command.Payload.Q[1],
             command.Payload.Q[2], command.Payload.Q[3]);
@@ -233,6 +247,8 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         packet.Payload.FirmwareVersion = PackVersion(1, 0, 0, 0);
         packet.Payload.HardwareVersion = 1;
         packet.Payload.CapFlags =
+            GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasRetract |
+            GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasNeutral |
             GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasRollAxis |
             GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasPitchAxis |
             GimbalDeviceCapFlags.GimbalDeviceCapFlagsHasYawAxis;
@@ -297,9 +313,15 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         packet.Payload.AngularVelocityX = state.RollRateRadiansPerSecond;
         packet.Payload.AngularVelocityY = state.PitchRateRadiansPerSecond;
         packet.Payload.AngularVelocityZ = state.YawRateRadiansPerSecond;
-        packet.Payload.Flags = state.YawFrame == GimbalYawFrame.Earth
+        var flags = state.YawFrame == GimbalYawFrame.Earth
             ? GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame
             : GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame;
+        packet.Payload.Flags = state.Position switch
+        {
+            GimbalPosition.Neutral => flags | GimbalDeviceFlags.GimbalDeviceFlagsNeutral,
+            GimbalPosition.Retracted => flags | GimbalDeviceFlags.GimbalDeviceFlagsRetract,
+            _ => flags
+        };
         packet.Payload.GimbalDeviceId = 0;
         return packet;
     }
@@ -342,7 +364,11 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         var yawInVehicleFrame = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame);
         var yawInEarthFrame = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame);
         var yawLock = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawLock);
+        var neutral = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsNeutral);
+        var retract = flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsRetract);
         var supportedFlags =
+            GimbalDeviceFlags.GimbalDeviceFlagsRetract |
+            GimbalDeviceFlags.GimbalDeviceFlagsNeutral |
             GimbalDeviceFlags.GimbalDeviceFlagsRollLock |
             GimbalDeviceFlags.GimbalDeviceFlagsPitchLock |
             GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame |
@@ -354,6 +380,14 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         {
             unsupportedFlags |= GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame |
                                 GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame;
+            yawFrame = GimbalYawFrame.Vehicle;
+            return false;
+        }
+
+        if (neutral && retract)
+        {
+            unsupportedFlags |= GimbalDeviceFlags.GimbalDeviceFlagsNeutral |
+                                GimbalDeviceFlags.GimbalDeviceFlagsRetract;
             yawFrame = GimbalYawFrame.Vehicle;
             return false;
         }
@@ -373,17 +407,18 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
     private static void LogDeviceSetAttitude(
         MavlinkMessageContext context,
         GimbalDeviceSetAttitudePacket command,
-        bool rateOnly)
+        bool rateOnly,
+        string? mode = null)
     {
         var message =
             $"GIMBAL_DEVICE_SET_ATTITUDE from {context.Source.SystemId}/{context.Source.ComponentId}\n" +
             $"  Target: {command.Payload.TargetSystem}/{command.Payload.TargetComponent}\n" +
             $"  Flags: {DescribeDeviceFlags(command.Payload.Flags)}\n" +
-            $"  Mode: {(rateOnly ? "rate" : "attitude")}\n" +
+            $"  Mode: {mode ?? (rateOnly ? "rate" : "attitude")}\n" +
             $"  Quaternion: [{command.Payload.Q[0]}, {command.Payload.Q[1]}, {command.Payload.Q[2]}, {command.Payload.Q[3]}]" +
             (rateOnly ? " (rate-only)" : string.Empty) + "\n" +
             $"  Angular velocity: [{command.Payload.AngularVelocityX}, {command.Payload.AngularVelocityY}, {command.Payload.AngularVelocityZ}]" +
-            GetEulerDescription(command, rateOnly);
+            GetEulerDescription(command, rateOnly || mode is not null);
         Console.WriteLine(message);
         context.Log.Write(message.Replace(Environment.NewLine, " | "));
     }
@@ -408,6 +443,8 @@ public sealed class GimbalComponent(byte systemId, byte componentId, IGimbalDevi
         if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsRollLock)) names.Add("RollLock");
         if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsPitchLock)) names.Add("PitchLock");
         if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawLock)) names.Add("YawLock");
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsNeutral)) names.Add("Neutral");
+        if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsRetract)) names.Add("Retract");
         if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInVehicleFrame)) names.Add("YawInVehicleFrame");
         if (flags.HasFlag(GimbalDeviceFlags.GimbalDeviceFlagsYawInEarthFrame)) names.Add("YawInEarthFrame");
         return names.Count == 0 ? "None" : string.Join("|", names);
